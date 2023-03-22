@@ -465,7 +465,7 @@ int main(int argc,char* argv[]) {
         }
         if (dictSize == 0){
             printf("Training Dictionary Fail!\n");
-        }
+        } 
         else{
                 FILE* fp_dict = fopen(train_dictFile,"wb");
                 if(fp_dict != NULL){
