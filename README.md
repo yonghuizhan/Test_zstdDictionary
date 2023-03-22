@@ -21,8 +21,11 @@ examples/Test_updateDictionary.c.
 #### Then 
 
 ~~~
-/examples make
+/examples make clean && make -j8
 ~~~
 
+~~~
+./Test_updateDictionary File
+~~~
 
-
+It will print Dictionary Size , Source Size and Compressed Size to the screen.

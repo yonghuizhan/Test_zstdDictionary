@@ -162,123 +162,123 @@ static void *loadDictToCCtx(ZSTD_CCtx* cctx,const void *dict,size_t dictSize){
     ZSTD_CCtx_loadDictionary(cctx, dict, dictSize) ;
 }
 /* Dictionary Compress a file. */
-size_t TEST_zstd_dictComp(char* srcFile,size_t *sSize,char* dictFile,size_t *dSize){
+// size_t TEST_zstd_dictComp(char* srcFile,size_t *sSize,char* dictFile,size_t *dSize){
     
     
-    size_t srcSize;
-    size_t dictSize;
-    char *input_file = srcFile; 
-    char *dict_file = dictFile;
-    void *srcBuff = loadFiletoBuff(input_file,&srcSize);
-    void *dictBuff = loadFiletoBuff(dict_file,&dictSize);
+//     size_t srcSize;
+//     size_t dictSize;
+//     char *input_file = srcFile; 
+//     char *dict_file = dictFile;
+//     void *srcBuff = loadFiletoBuff(input_file,&srcSize);
+//     void *dictBuff = loadFiletoBuff(dict_file,&dictSize);
  
-    *sSize = srcSize;
-    *dSize = dictSize; 
-    size_t outSize = srcSize;
-    void  *outFile = malloc_orDie(outSize);
+//     *sSize = srcSize;
+//     *dSize = dictSize; 
+//     size_t outSize = srcSize;
+//     void  *outFile = malloc_orDie(outSize);
 
-    ZSTD_CCtx* cctx = ZSTD_createCCtx();
-    /* Load dict into cctx localDict */
-    loadDictToCCtx(cctx,dictBuff,dictSize);
+//     ZSTD_CCtx* cctx = ZSTD_createCCtx();
+//     /* Load dict into cctx localDict */
+//     loadDictToCCtx(cctx,dictBuff,dictSize);
 
-    /*Compress srcBuff*/
-    ZSTD_inBuffer inBuff = { (char*)srcBuff, srcSize, 0 };
-    ZSTD_outBuffer outBuff= { outFile, outSize, 0 };
-    ZSTD_compressStream2(cctx, &outBuff, &inBuff, ZSTD_e_end);
-    outSize =outBuff.pos;
-    char* output_file = NULL;
-    //    char* outDirName = NULL;
-    // char* suffix = ".zst";
-    // output_file  = FIO_determineCompressedName(srcFile, suffix);  /* cannot fail */
-    output_file = createOutFilename_orDie(srcFile);
-    FILE *fp_out=fopen(output_file,"wb");
-    if (fp_out == NULL){
-        printf("Fail to save compressed file!\n");
-    }
-    else{
-        fwrite(outBuff.dst,outSize,1,fp_out);
-    }
-    fclose(fp_out);
-    ZSTD_freeCCtx(cctx);
-    free(srcBuff);
-    free(dictBuff);
-    free(outFile);
-    free(output_file);
-    return outSize;
-}
+//     /*Compress srcBuff*/
+//     ZSTD_inBuffer inBuff = { (char*)srcBuff, srcSize, 0 };
+//     ZSTD_outBuffer outBuff= { outFile, outSize, 0 };
+//     ZSTD_compressStream2(cctx, &outBuff, &inBuff, ZSTD_e_end);
+//     outSize =outBuff.pos;
+//     char* output_file = NULL;
+//     //    char* outDirName = NULL;
+//     // char* suffix = ".zst";
+//     // output_file  = FIO_determineCompressedName(srcFile, suffix);  /* cannot fail */
+//     output_file = createOutFilename_orDie(srcFile);
+//     FILE *fp_out=fopen(output_file,"wb");
+//     if (fp_out == NULL){
+//         printf("Fail to save compressed file!\n");
+//     }
+//     else{
+//         fwrite(outBuff.dst,outSize,1,fp_out);
+//     }
+//     fclose(fp_out);
+//     ZSTD_freeCCtx(cctx);
+//     free(srcBuff);
+//     free(dictBuff);
+//     free(outFile);
+//     free(output_file);
+//     return outSize;
+// }
 /* Train a dictionary with a srcFile. */
-void TEST_zstd_train_dict(char *srcFileNmae, char *outFile,size_t bSize){
-    const int optimize = 1;         /* 1 To find the best parameters 0 or not*/
-    unsigned int memLimit = 0;
-    size_t blockSize = bSize;
-    char * outFileName = outFile;
-    unsigned int maxDictSize = MAX_DICTSIZE;
-    int operationResult = 0;
-    size_t argCount = 6;                        /* It is a optional parameters , which is bigger than filenames number.*/
-    FileNamesTable* filenames = UTIL_allocateFileNamesTable((size_t)argCount);  /* argCount >= 1 */
+// void TEST_zstd_train_dict(char *srcFileNmae, char *outFile,size_t bSize){
+//     const int optimize = 1;         /* 1 To find the best parameters 0 or not*/
+//     unsigned int memLimit = 0;
+//     size_t blockSize = bSize;
+//     char * outFileName = outFile;
+//     unsigned int maxDictSize = MAX_DICTSIZE;
+//     int operationResult = 0;
+//     size_t argCount = 6;                        /* It is a optional parameters , which is bigger than filenames number.*/
+//     FileNamesTable* filenames = UTIL_allocateFileNamesTable((size_t)argCount);  /* argCount >= 1 */
     
-    filenames->fileNames[filenames->tableSize] = srcFileNmae;
-    filenames->tableSize++;
-    ZDICT_fastCover_params_t fastCoverParams = defaultFastCoverParams();
-    /* Train dictionary from srcFile.*/
-    operationResult = DiB_trainFromFiles(outFileName, maxDictSize, filenames->fileNames, 
-                                            (int)filenames->tableSize, blockSize, 
-                                            NULL, NULL, &fastCoverParams, 
-                                            optimize, memLimit);
-    UTIL_freeFileNamesTable(filenames);
-}
+//     filenames->fileNames[filenames->tableSize] = srcFileNmae;
+//     filenames->tableSize++;
+//     ZDICT_fastCover_params_t fastCoverParams = defaultFastCoverParams();
+//     /* Train dictionary from srcFile.*/
+//     operationResult = DiB_trainFromFiles(outFileName, maxDictSize, filenames->fileNames, 
+//                                             (int)filenames->tableSize, blockSize, 
+//                                             NULL, NULL, &fastCoverParams, 
+//                                             optimize, memLimit);
+//     UTIL_freeFileNamesTable(filenames);
+// }
 /* Dictionary Decompress a file. */
-void TEST_zstd_dictDecomp(   char* dictFileName,   char* srcName,size_t *srcSize,   char* outputFileNmae,size_t* outputSize ){
+// void TEST_zstd_dictDecomp(   char* dictFileName,   char* srcName,size_t *srcSize,   char* outputFileNmae,size_t* outputSize ){
     
-    // void* dictBuffer;
-       char* dictName = dictFileName;
-    // size_t dictSize;
+//     // void* dictBuffer;
+//        char* dictName = dictFileName;
+//     // size_t dictSize;
 
-    //    char* outName;
-    void* outBuffer;
-       char* inputNmae = srcName;
-    size_t inputSize;
-    void* inputBuffer;
+//     //    char* outName;
+//     void* outBuffer;
+//        char* inputNmae = srcName;
+//     size_t inputSize;
+//     void* inputBuffer;
 
-    /*Load dictionary into dictBuffer and create outBuff.*/
-    // dictBuffer = loadFiletoBuff(dictName,&dictSize);
-    ZSTD_DDict* const dictPtr = createDict_orDie(dictName);
-    inputBuffer = loadFiletoBuff(inputNmae,&inputSize);
+//     /*Load dictionary into dictBuffer and create outBuff.*/
+//     // dictBuffer = loadFiletoBuff(dictName,&dictSize);
+//     ZSTD_DDict* const dictPtr = createDict_orDie(dictName);
+//     inputBuffer = loadFiletoBuff(inputNmae,&inputSize);
 
-    unsigned long long  const  outSize = ZSTD_getFrameContentSize(inputBuffer,inputSize);   /*Get the size of file that before compress from freame.*/
-    CHECK(outSize != ZSTD_CONTENTSIZE_ERROR, "%s: not compressed by zstd!", inputNmae);
-    CHECK(outSize != ZSTD_CONTENTSIZE_UNKNOWN, "%s: original size unknown!", inputNmae);
-    outBuffer = malloc_orDie((size_t) outSize);
+//     unsigned long long  const  outSize = ZSTD_getFrameContentSize(inputBuffer,inputSize);   /*Get the size of file that before compress from freame.*/
+//     CHECK(outSize != ZSTD_CONTENTSIZE_ERROR, "%s: not compressed by zstd!", inputNmae);
+//     CHECK(outSize != ZSTD_CONTENTSIZE_UNKNOWN, "%s: original size unknown!", inputNmae);
+//     outBuffer = malloc_orDie((size_t) outSize);
 
-    ZSTD_DCtx* const dctx = ZSTD_createDCtx();
-    CHECK(dctx != NULL, "ZSTD_createDCtx() failed!");
-    size_t dSize = ZSTD_decompress_usingDDict(dctx, outBuffer, outSize, inputBuffer, inputSize, dictPtr);  /* Use dictionary decompress.*/
-    CHECK_ZSTD(dSize);
-    /* When zstd knows the content size, it will error if it doesn't match. */
-    CHECK(dSize == outSize, "Impossible because zstd will check this condition!");
+//     ZSTD_DCtx* const dctx = ZSTD_createDCtx();
+//     CHECK(dctx != NULL, "ZSTD_createDCtx() failed!");
+//     size_t dSize = ZSTD_decompress_usingDDict(dctx, outBuffer, outSize, inputBuffer, inputSize, dictPtr);  /* Use dictionary decompress.*/
+//     CHECK_ZSTD(dSize);
+//     /* When zstd knows the content size, it will error if it doesn't match. */
+//     CHECK(dSize == outSize, "Impossible because zstd will check this condition!");
 
-    *srcSize = inputSize;
-    *outputSize = outSize;
+//     *srcSize = inputSize;
+//     *outputSize = outSize;
     
-    char* dfile = outputFileNmae;
-    FILE *fp_decomp = fopen(dfile,"wb");
-    if (fp_decomp == NULL){
-        printf("Save decompress file fail!\n");
-    }
-    else{
-        fwrite(outBuffer,dSize,1,fp_decomp);
-        printf("%25s : %6u -> %7u \n", inputNmae, (unsigned)inputSize, (unsigned)outSize);
-    }
-    fclose(fp_decomp);
+//     char* dfile = outputFileNmae;
+//     FILE *fp_decomp = fopen(dfile,"wb");
+//     if (fp_decomp == NULL){
+//         printf("Save decompress file fail!\n");
+//     }
+//     else{
+//         fwrite(outBuffer,dSize,1,fp_decomp);
+//         printf("%25s : %6u -> %7u \n", inputNmae, (unsigned)inputSize, (unsigned)outSize);
+//     }
+//     fclose(fp_decomp);
 
-    ZSTD_freeDCtx(dctx);
-    ZSTD_freeDDict(dictPtr);
-    // ZSTD_DStream* ddctx = ZSTD_createDStream();
-    // ZSTD_DCtx_loadDictionary(ddctx,dictBuffer,dictSize);
-    // free(dictBuffer);
-    free(inputBuffer);
-    free(outBuffer);
-}
+//     ZSTD_freeDCtx(dctx);
+//     ZSTD_freeDDict(dictPtr);
+//     // ZSTD_DStream* ddctx = ZSTD_createDStream();
+//     // ZSTD_DCtx_loadDictionary(ddctx,dictBuffer,dictSize);
+//     // free(dictBuffer);
+//     free(inputBuffer);
+//     free(outBuffer);
+// }
 /* Set samplesSizes.
     @return 1:error
             0 complete set samplesizes.*/
@@ -311,10 +311,10 @@ int SetsamplesSizes(size_t srcSize,size_t blockSize,size_t* samplesSizes){
                 }
             }
     }
-    size_t d = (int)((sSize+bSize-1)/bSize);
-    for (int i =0;(i < nbSamplesLoaded) && (i < d);i++){
-        printf("samplesLoaded [%d]  = %ld\n",i,samplesSizes[i]);
-    }
+    // size_t d = (int)((sSize+bSize-1)/bSize);
+    // for (int i =0;(i < nbSamplesLoaded) && (i < d);i++){
+    //     printf("samplesLoaded [%d]  = %ld\n",i,samplesSizes[i]);
+    // }
     return 0;
 }
 /* Get a Dictionary by training the sample data stream.*/
@@ -367,80 +367,72 @@ size_t Stream_zstd_dictComp(void* srcBuffer,size_t srcSize,void* dictBuffer,size
 }
 int main(int argc,char* argv[]) {
    
-    // {   /* Stream Train Dictionary.*/
-    //     size_t MaxDictSize = MAX_DICTSIZE;
-    //     size_t blockSize = 4096;
-    //     size_t srcSize;
-    //     size_t dictSize;
-    //     void* const dictBuffer = malloc(MaxDictSize);
-    //     // void* const dictBuffer;
-    //     void*  srcBuffer = loadFiletoBuff(input_file,&srcSize);
+//    int argCount;
+   char *file_in = argv[1];
+//    char *file_dict;
+//    int check =0;
+      /* Stream Train Dictionary.*/
+    size_t MaxDictSize = MAX_DICTSIZE;
+    size_t blockSize = 4096;
+    size_t srcSize;
+    size_t dictSize;
+    void* const dictBuffer = malloc(MaxDictSize);
+    // void* const dictBuffer;
+    void*  srcBuffer = loadFiletoBuff(file_in,&srcSize);
 
-    //     ZDICT_fastCover_params_t fastCoverParams = defaultFastCoverParams();
-    //     dictSize = DictionaryTrain_stream(dictBuffer,MaxDictSize,srcBuffer,srcSize,blockSize,&fastCoverParams);
-    //     if (check){
-    //         printf("Src size  = %ld\n",srcSize);
-    //     }
-    //     if (dictSize == 0){
-    //         printf("Training Dictionary Fail!\n");
-    //     } 
-    //     else{
-    //             FILE* fp_dict = fopen(train_dictFile,"wb");
-    //             if(fp_dict != NULL){
-    //                 fwrite(dictBuffer,dictSize,1,fp_dict);
-    //                 printf("Dictionaey size = %ld\n",dictSize);
-    //             }
-    //             else{
-    //                 printf("Error:Save Dictionary File Fail!\n");
-    //             }
-    //             fclose(fp_dict);
-    //     }
-    //     free(srcBuffer);
-    //     free(dictBuffer);
-    // }
+    ZDICT_fastCover_params_t fastCoverParams = defaultFastCoverParams();
+    dictSize = DictionaryTrain_stream(dictBuffer,MaxDictSize,srcBuffer,srcSize,blockSize,&fastCoverParams);
+    
+    printf("Source size  = %ld\n",srcSize);
+    printf("Dictionary Size = %ld\n",dictSize);
+    if ( dictSize == 0 ){
+        printf("Training Dictionary Fail!\n");
+    } 
+        // else{
+        //         FILE* fp_dict = fopen(train_dictFile,"wb");
+        //         if(fp_dict != NULL){
+        //             fwrite(dictBuffer,dictSize,1,fp_dict);
+        //             printf("Dictionaey size = %ld\n",dictSize);
+        //         }
+        //         else{
+        //             printf("Error:Save Dictionary File Fail!\n");
+        //         }
+        //         fclose(fp_dict);
+        // }
+        
+    
 
-    { /* Stream Dictionary Compress. */
-        char *file_out = "/home/yonghui/dictSize/test_mydictComp/CHANGELOG.zst";
-        char *file_in = "/home/yonghui/dictSize/test_mydictComp/CHANGELOG";
-        char *file_dict = "/home/yonghui/dictSize/test_mydictComp/dict_CHANGELOG.bin";
-        size_t srcSize;
-        size_t dictSize;
-        void *srcBuffer = mallocAndLoadFile_orDie(file_in,&srcSize);
-        void *dictBuffer = mallocAndLoadFile_orDie(file_dict,&dictSize);
-        void *outBuffer = malloc(srcSize);
-        size_t outSize = 0;
-        outSize = Stream_zstd_dictComp(srcBuffer,srcSize,dictBuffer,dictSize,outBuffer);
-        printf("Compressed Size = %ld\n",outSize);
-        printf("H");
-        if ( outSize == 0 ){
-            printf("Error:Dictionary Compress Fail!\n");
-        }
-        else{
-            FILE *fp_out = fopen(file_out,"wb");
-            printf("E");
-            if(fp_out != NULL){
-                printf("F");
-                fwrite(outBuffer,outSize,1,fp_out);
-                printf("G");
-            }
-            else{
-                printf("Save Compressed File Fail!\n");
-            }
-            fclose(fp_out);
-        }
-        printf("A");
-        free(srcBuffer);
-        printf("B");
-        free(dictBuffer);
-        printf("C");
-        free(outBuffer);
-        printf("D");
+    /* Stream Dictionary Compress. */
+        // char *file_out = "/home/yonghui/dictSize/test_mydictComp/CHANGELOG.zst";
+        // char *file_in = "/home/yonghui/dictSize/test_mydictComp/CHANGELOG";
+        // char *file_dict = "/home/yonghui/dictSize/test_mydictComp/dict_CHANGELOG.bin";
+        // size_t srcSize;
+        // size_t dictSize;
+        // void *srcBuffer = mallocAndLoadFile_orDie(file_in,&srcSize);
+        // void *dictBuffer = mallocAndLoadFile_orDie(file_dict,&dictSize);
+    void *outBuffer = malloc(srcSize);
+    size_t outSize = 0;
+    outSize = Stream_zstd_dictComp(srcBuffer,srcSize,dictBuffer,dictSize,outBuffer);
+    printf("Dictionary Compressed Size = %ld\n",outSize);
+    if ( outSize == 0 ){
+        printf("Error:Dictionary Compress Fail!\n");
     }
-    // char *input_file = "/home/yonghui/dictSize/test_mydictComp/CHANGELOG";
-    // char *train_dictfile = "/home/yonghui/dictSize/test_mydictComp/dict_CHANGELOG.bin";
-    // size_t srcSize;
-    // size_t dictSize;
-    // TEST_zstd_dictComp(input_file,&srcSize,train_dictfile,&dictSize);
+    // else{
+    //     FILE *fp_out = fopen(file_out,"wb");
+    //     printf("E");
+    //     if(fp_out != NULL){
+    //         printf("F");
+    //         fwrite(outBuffer,outSize,1,fp_out);
+    //         printf("G");
+    //     }
+    //     else{
+    //         printf("Save Compressed File Fail!\n");
+    //     }
+    //     fclose(fp_out);
+    // }
+    free(outBuffer);
+    free(srcBuffer);
+    free(dictBuffer);
     
     
     return 0;
