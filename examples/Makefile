@@ -99,7 +99,7 @@ OBJ = ../programs/obj/conf_aec26574c336b900571a5deec4052692/util.o \
 ../programs/obj/conf_aec26574c336b900571a5deec4052692/timefn.o \
 Test_updateDictionary.o
 LDFLAGS = -L../lib/ -lzstd
-CFLAGS = -c -g  
+CFLAGS = -c -g  -Wall
 $(TARGET): $(OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS)
 Test_updateDictionary.o:Test_updateDictionary.c 

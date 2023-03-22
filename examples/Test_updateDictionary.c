@@ -35,39 +35,39 @@
 static const unsigned kDefaultRegression = 1;
 
 
-static int readU32FromCharChecked(const char** stringPtr, unsigned* value)
-{
-    unsigned result = 0;
-    while ((**stringPtr >='0') && (**stringPtr <='9')) {
-        unsigned const max = ((unsigned)(-1)) / 10;
-        unsigned last = result;
-        if (result > max) return 1; /* overflow error */
-        result *= 10;
-        result += (unsigned)(**stringPtr - '0');
-        if (result < last) return 1; /* overflow error */
-        (*stringPtr)++ ;
-    }
-    if ((**stringPtr=='K') || (**stringPtr=='M')) {
-        unsigned const maxK = ((unsigned)(-1)) >> 10;
-        if (result > maxK) return 1; /* overflow error */
-        result <<= 10;
-        if (**stringPtr=='M') {
-            if (result > maxK) return 1; /* overflow error */
-            result <<= 10;
-        }
-        (*stringPtr)++;  /* skip `K` or `M` */
-        if (**stringPtr=='i') (*stringPtr)++;
-        if (**stringPtr=='B') (*stringPtr)++;
-    }
-    *value = result;
-    return 0;
-}
-static unsigned readU32FromChar(const char** stringPtr) {
-    static const char errorMsg[] = "error: numeric value overflows 32-bit unsigned int";
-    unsigned result;
-    if (readU32FromCharChecked(stringPtr, &result)) 
-    return result;
-}
+// static int readU32FromCharChecked(const char** stringPtr, unsigned* value)
+// {
+//     unsigned result = 0;
+//     while ((**stringPtr >='0') && (**stringPtr <='9')) {
+//         unsigned const max = ((unsigned)(-1)) / 10;
+//         unsigned last = result;
+//         if (result > max) return 1; /* overflow error */
+//         result *= 10;
+//         result += (unsigned)(**stringPtr - '0');
+//         if (result < last) return 1; /* overflow error */
+//         (*stringPtr)++ ;
+//     }
+//     if ((**stringPtr=='K') || (**stringPtr=='M')) {
+//         unsigned const maxK = ((unsigned)(-1)) >> 10;
+//         if (result > maxK) return 1; /* overflow error */
+//         result <<= 10;
+//         if (**stringPtr=='M') {
+//             if (result > maxK) return 1; /* overflow error */
+//             result <<= 10;
+//         }
+//         (*stringPtr)++;  /* skip `K` or `M` */
+//         if (**stringPtr=='i') (*stringPtr)++;
+//         if (**stringPtr=='B') (*stringPtr)++;
+//     }
+//     *value = result;
+//     return 0;
+// }
+// static unsigned readU32FromChar(const char** stringPtr) {
+//     // static const char errorMsg[] = "error: numeric value overflows 32-bit unsigned int";
+//     unsigned result;
+//     if (readU32FromCharChecked(stringPtr, &result)) 
+//     return result;
+// }
 static int SvaeFile(char* FileName,size_t Size,void* srcBuff){
     const char* f = FileName;
     size_t size = Size;
@@ -103,7 +103,7 @@ static void compress_orDie(const char* fname, const char* oname)
     free(fBuff);
     free(cBuff);
 }
-
+/* Create a ouputFile like "xxx.zst" */
 static char* createOutFilename_orDie(const char* filename)
 {
     size_t const inL = strlen(filename);
@@ -135,29 +135,7 @@ static ZDICT_fastCover_params_t defaultFastCoverParams(void)
     params.zParams = zParams;
     return params;
 }
-
-// static const char*
-// FIO_determineCompressedName(const char* srcFileName, const char* suffix){
-//     static size_t dfnbCapacity = 0;
-//     static char* dstFileNameBuffer = NULL;   /* using static allocation : this function cannot be multi-threaded */
-//     size_t sfnSize = strlen(srcFileName);
-//     size_t const srcSuffixLen = strlen(suffix);
-
-//     if (dfnbCapacity <= sfnSize+srcSuffixLen+1) {
-//         /* resize buffer for dstName */
-//         free(dstFileNameBuffer);
-//         dfnbCapacity = sfnSize + srcSuffixLen + 30;
-//         dstFileNameBuffer = (char*)malloc(dfnbCapacity);
-//         if (!dstFileNameBuffer) {
-//             printf("Create outputName fail.\n");
-//         }
-//     }
-
-//     memcpy(dstFileNameBuffer, srcFileName, sfnSize);
-//     memcpy(dstFileNameBuffer+sfnSize, suffix, srcSuffixLen+1 /* Include terminating null */);
-//     return dstFileNameBuffer;
-// }
-
+ /* Create contex for dictcompress or dictdecompress. */
 static ZSTD_DDict* createDict_orDie(const char* dictFileName)
 {
     size_t dictSize;
@@ -183,8 +161,8 @@ static void *loadDictToCCtx(ZSTD_CCtx* cctx,const void *dict,size_t dictSize){
     // CHECK( ZSTD_CCtx_loadDictionary(cctx, dict, dictSize) );
     ZSTD_CCtx_loadDictionary(cctx, dict, dictSize) ;
 }
-
-size_t TEST_zstd_dictComp(   char* srcFile,size_t *sSize,   char* dictFile,size_t *dSize){
+/* Dictionary Compress a file. */
+size_t TEST_zstd_dictComp(char* srcFile,size_t *sSize,char* dictFile,size_t *dSize){
     
     
     size_t srcSize;
@@ -249,14 +227,14 @@ void TEST_zstd_train_dict(char *srcFileNmae, char *outFile,size_t bSize){
                                             optimize, memLimit);
     UTIL_freeFileNamesTable(filenames);
 }
-
+/* Dictionary Decompress a file. */
 void TEST_zstd_dictDecomp(   char* dictFileName,   char* srcName,size_t *srcSize,   char* outputFileNmae,size_t* outputSize ){
     
-    void* dictBuffer;
+    // void* dictBuffer;
        char* dictName = dictFileName;
-    size_t dictSize;
+    // size_t dictSize;
 
-       char* outName;
+    //    char* outName;
     void* outBuffer;
        char* inputNmae = srcName;
     size_t inputSize;
@@ -301,64 +279,6 @@ void TEST_zstd_dictDecomp(   char* dictFileName,   char* srcName,size_t *srcSize
     free(inputBuffer);
     free(outBuffer);
 }
-
-void TEST_zstd_regComp(const char *FileName,const char *outputFile){
-    const char *srcFileName = FileName;
-    char *outFileName = outputFile;
-    if (outFileName == NULL){
-        outFileName = createOutFilename_orDie(srcFileName);
-    }
-    compress_orDie(srcFileName,outFileName);
-}
-/* Load srcBuffer to sampleBuffer. */
-// static int loadintoSamples(void* buffer, size_t bufferSize,void* srcBuffer,
-//                             size_t* sampleSizes, int nbSamples,
-//                             size_t targetBlockSize, 
-//                             int displayLevel )
-// {
-//     char* const buff = (char*)buffer;
-//     char* src = srcBuffer;
-//     size_t totalDataLoaded = 0;
-//     size_t fileDataLoaded = 0;
-//     int nbSamplesLoaded = 0;
-//     S64 const fileSize = bufferSize;
-    
-//     while ( nbSamplesLoaded < nbSamples ) {        
-//         /* Load the first chunk of data from the srcBUffer. */
-//         fileDataLoaded = targetBlockSize > 0 ?
-//                             (size_t)MIN(fileSize, (S64)targetBlockSize) :
-//                             (size_t)MIN(fileSize, SAMPLESIZE_MAX );
-        
-//         if (totalDataLoaded + fileDataLoaded > bufferSize)
-//             break;
-//         if ( memmove(buff+totalDataLoaded,srcBuffer,fileDataLoaded) == NULL) {
-//             printf("Copy data to buffer fail from sample.\n ");
-//             return 0;
-//         }
-//         sampleSizes[nbSamplesLoaded++] = fileDataLoaded;
-//         totalDataLoaded += fileDataLoaded;
-
-//         /* If srcbuffer-chunking is enabled, load the rest of the srcbuffer as more samples */
-//         if (targetBlockSize > 0) {
-//             while( (S64)fileDataLoaded < fileSize && nbSamplesLoaded < nbSamples ) {
-//                 size_t const chunkSize = MIN((size_t)(fileSize-fileDataLoaded), targetBlockSize);
-//                 if (totalDataLoaded + chunkSize > *) /* buffer is full */
-//                     break;
-
-//                 if (fread( buff+totalDataLoaded, 1, chunkSize, f ) != chunkSize)
-//                     EXM_THROW(11, "Pb reading %s", fileNamesTable[fileIndex]);
-//                 sampleSizes[nbSamplesLoaded++] = chunkSize;
-//                 totalDataLoaded += chunkSize;
-//                 fileDataLoaded += chunkSize;
-//             }
-//         }    
-//     }
-//     DISPLAYLEVEL(2, "\r%79s\r", "");
-//     DISPLAYLEVEL(4, "Loaded %d KB total training data, %d nb samples \n",
-//         (int)(totalDataLoaded / (1 KB)), nbSamplesLoaded );
-//     *bufferSizePtr = totalDataLoaded;
-//     return nbSamplesLoaded;
-// }
 /* Set samplesSizes.
     @return 1:error
             0 complete set samplesizes.*/
@@ -424,75 +344,105 @@ static size_t  DictionaryTrain_stream(void* const outBuffer,size_t MaxOutSize,
     free(sampleSizes);
     return dictSize;
 }
-int main(int argc,char* argv[]) {
-    int check = 1;
-    // char* input_file = "/home/yonghui/dictSize/test_mydictComp/nci";
-    char* input_file = "/home/yonghui/dictSize/test_mydictComp/CHANGELOG";
-    // char* output_file = "/home/yonghui/dictSize/test_mydictComp/nci.zst";
-    // char* output_file_reg = "/home/yonghui/dictSize/test_mydictComp/reg_nci.zst";
+size_t Stream_zstd_dictComp(void* srcBuffer,size_t srcSize,void* dictBuffer,size_t dictSize,void* OutBuffer){
 
-    char* train_dictFile = "/home/yonghui/dictSize/test_mydictComp/dict_nci_test.bin";
-    // char* cfile = output_file;
-    // char* dfile = "/home/yonghui/dictSize/test_mydictComp/nci_test";
-    // char *dfile = "../../Dictionary/dict.bin";
-    char *dcompfile = "../../DictComp/temp";
-    char *ftemp = "../../Temp/temp";
-    /* Load src file and dict file*/
-    size_t srcSize;
-    size_t dictSize;
-    size_t outSize;     /*Output file size*/
-    // size_t blockSize = 4096;
-    size_t decompSize;
-    size_t cSize;
-    size_t dSize;
-    // int mode = 0;
+    void *srcBuff = srcBuffer;
+    void *dictBuff = dictBuffer;
+    size_t outSize = srcSize;
+    void  *outBuffer = OutBuffer;
+    // outBuffer = malloc_orDie(outSize);
+
+    ZSTD_CCtx* cctx = ZSTD_createCCtx();
+    /* Load dict into cctx localDict */
+    loadDictToCCtx(cctx,dictBuff,dictSize);
+
+    /*Compress srcBuff*/
+    ZSTD_inBuffer inBuff = { srcBuff, srcSize, 0 };
+    ZSTD_outBuffer outBuff= { outBuffer, outSize, 0 };
+    ZSTD_compressStream2(cctx, &outBuff, &inBuff, ZSTD_e_end);
+    outSize =outBuff.pos;
     
-    // if(check) {printf("A\n");}
-    // TEST_zstd_train_dict(input_file,train_dictFile,blockSize);
-    {   
-        size_t MaxDictSize = MAX_DICTSIZE;
-        size_t blockSize = 4096;
+    ZSTD_freeCCtx(cctx);
+    return outSize;
+}
+int main(int argc,char* argv[]) {
+   
+    // {   /* Stream Train Dictionary.*/
+    //     size_t MaxDictSize = MAX_DICTSIZE;
+    //     size_t blockSize = 4096;
+    //     size_t srcSize;
+    //     size_t dictSize;
+    //     void* const dictBuffer = malloc(MaxDictSize);
+    //     // void* const dictBuffer;
+    //     void*  srcBuffer = loadFiletoBuff(input_file,&srcSize);
+
+    //     ZDICT_fastCover_params_t fastCoverParams = defaultFastCoverParams();
+    //     dictSize = DictionaryTrain_stream(dictBuffer,MaxDictSize,srcBuffer,srcSize,blockSize,&fastCoverParams);
+    //     if (check){
+    //         printf("Src size  = %ld\n",srcSize);
+    //     }
+    //     if (dictSize == 0){
+    //         printf("Training Dictionary Fail!\n");
+    //     } 
+    //     else{
+    //             FILE* fp_dict = fopen(train_dictFile,"wb");
+    //             if(fp_dict != NULL){
+    //                 fwrite(dictBuffer,dictSize,1,fp_dict);
+    //                 printf("Dictionaey size = %ld\n",dictSize);
+    //             }
+    //             else{
+    //                 printf("Error:Save Dictionary File Fail!\n");
+    //             }
+    //             fclose(fp_dict);
+    //     }
+    //     free(srcBuffer);
+    //     free(dictBuffer);
+    // }
+
+    { /* Stream Dictionary Compress. */
+        char *file_out = "/home/yonghui/dictSize/test_mydictComp/CHANGELOG.zst";
+        char *file_in = "/home/yonghui/dictSize/test_mydictComp/CHANGELOG";
+        char *file_dict = "/home/yonghui/dictSize/test_mydictComp/dict_CHANGELOG.bin";
         size_t srcSize;
         size_t dictSize;
-        void* const dictBuffer = malloc(MaxDictSize);
-        // void* const dictBuffer;
-        void*  srcBuffer = loadFiletoBuff(input_file,&srcSize);
-
-        ZDICT_fastCover_params_t fastCoverParams = defaultFastCoverParams();
-        dictSize = DictionaryTrain_stream(dictBuffer,MaxDictSize,srcBuffer,srcSize,blockSize,&fastCoverParams);
-        if (check){
-            printf("Src size  = %ld\n",srcSize);
+        void *srcBuffer = mallocAndLoadFile_orDie(file_in,&srcSize);
+        void *dictBuffer = mallocAndLoadFile_orDie(file_dict,&dictSize);
+        void *outBuffer = malloc(srcSize);
+        size_t outSize = 0;
+        outSize = Stream_zstd_dictComp(srcBuffer,srcSize,dictBuffer,dictSize,outBuffer);
+        printf("Compressed Size = %ld\n",outSize);
+        printf("H");
+        if ( outSize == 0 ){
+            printf("Error:Dictionary Compress Fail!\n");
         }
-        if (dictSize == 0){
-            printf("Training Dictionary Fail!\n");
-        } 
         else{
-                FILE* fp_dict = fopen(train_dictFile,"wb");
-                if(fp_dict != NULL){
-                    fwrite(dictBuffer,dictSize,1,fp_dict);
-                    printf("Dictionaey size = %ld\n",dictSize);
-                }
-                else{
-                    printf("Error:Save Dictionary File Fail!\n");
-                }
-                fclose(fp_dict);
+            FILE *fp_out = fopen(file_out,"wb");
+            printf("E");
+            if(fp_out != NULL){
+                printf("F");
+                fwrite(outBuffer,outSize,1,fp_out);
+                printf("G");
+            }
+            else{
+                printf("Save Compressed File Fail!\n");
+            }
+            fclose(fp_out);
         }
+        printf("A");
         free(srcBuffer);
+        printf("B");
         free(dictBuffer);
+        printf("C");
+        free(outBuffer);
+        printf("D");
     }
-        
-
-    // if(check) {printf("B\n");}
-    // TEST_zstd_regComp(input_file,output_file_reg);
-
-    // if(check) {printf("C\n");}
-    // TEST_zstd_dictComp(input_file,&srcSize,train_dictFile,&dictSize);
-
-    // if (mode){
-    //     if(check) {printf("D\n");}
-    //     TEST_zstd_dictDecomp(train_dictFile,cfile,&cSize,dfile,&dSize);
-    //     if(check) {printf("E\n");}
-    // }
+    // char *input_file = "/home/yonghui/dictSize/test_mydictComp/CHANGELOG";
+    // char *train_dictfile = "/home/yonghui/dictSize/test_mydictComp/dict_CHANGELOG.bin";
+    // size_t srcSize;
+    // size_t dictSize;
+    // TEST_zstd_dictComp(input_file,&srcSize,train_dictfile,&dictSize);
+    
+    
     return 0;
 }
 
