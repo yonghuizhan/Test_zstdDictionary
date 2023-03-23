@@ -338,7 +338,7 @@ static size_t  DictionaryTrain_stream(void* const outBuffer,size_t MaxOutSize,
                             void* srcBuffer,size_t srcSize,
                             size_t blockSize,ZDICT_fastCover_params_t *parameters)
 {
-    void*  dictBuffer = outBuffer;
+    void*  dictBuffer = outBuffer;  
     size_t dictSize = 0;
     size_t maxDictSize = MaxOutSize;
     void* sampleBuffer = malloc(srcSize+32);
@@ -369,7 +369,7 @@ static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* dictBuf
     size_t outSize = srcSize;
     void  *outBuffer = OutBuffer;
     // outBuffer = malloc_orDie(outSize);
-
+    /*HHHH*/
     ZSTD_CCtx* cctx = ZSTD_createCCtx();
     /* Load dict into cctx localDict */
     loadDictToCCtx(cctx,dictBuff,dictSize);
