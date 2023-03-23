@@ -13,7 +13,7 @@
 #include <string.h>
 #include <assert.h>
 #include <malloc.h>
-#include <unistd.h> /*access check file exisit.*/
+#include <unistd.h> /* access check file exisit. */
 
 #include "../lib/zstd.h"
 #include "../lib/common.h"
@@ -344,7 +344,7 @@ static size_t  DictionaryTrain_stream(void* const outBuffer,size_t MaxOutSize,
     free(sampleSizes);
     return dictSize;
 }
-size_t Stream_zstd_dictComp(void* srcBuffer,size_t srcSize,void* dictBuffer,size_t dictSize,void* OutBuffer){
+static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* dictBuffer,size_t dictSize,void* OutBuffer){
 
     void *srcBuff = srcBuffer;
     void *dictBuff = dictBuffer;
@@ -364,13 +364,27 @@ size_t Stream_zstd_dictComp(void* srcBuffer,size_t srcSize,void* dictBuffer,size
     
     ZSTD_freeCCtx(cctx);
     return outSize;
+} 
+/* Regualr Compress the srcBuffer given,and return the compressed size.*/
+static size_t RegularComp_Stream(void* srcBuffer,size_t srcSize,void* outBuffer){
+    void *buffIn = srcBuffer;
+    size_t sSize = srcSize;
+    ZSTD_inBuffer inBuff = { buffIn, sSize, 0 };
+    ZSTD_outBuffer outBuff= { outBuffer, sSize, 0 };
+    ZSTD_CCtx* const cctx = ZSTD_createCCtx();
+    ZSTD_EndDirective const mode = ZSTD_e_end;
+    /* If all the input data is been consumed ,return 0.*/
+    size_t remaining = ZSTD_compressStream2(cctx,&outBuff,&inBuff,mode);
+    if (remaining){
+        printf("Don't compress the data stream completely!\n");
+        printf("Remaining = %ld\n",remaining);
+    }
+    size_t outSize = outBuff.pos;
+    return outSize;
 }
 int main(int argc,char* argv[]) {
    
-//    int argCount;
    char *file_in = argv[1];
-//    char *file_dict;
-//    int check =0;
       /* Stream Train Dictionary.*/
     size_t MaxDictSize = MAX_DICTSIZE;
     size_t blockSize = 4096;
@@ -378,7 +392,7 @@ int main(int argc,char* argv[]) {
     size_t dictSize;
     void* const dictBuffer = malloc(MaxDictSize);
     // void* const dictBuffer;
-    void*  srcBuffer = loadFiletoBuff(file_in,&srcSize);
+    const void*  srcBuffer = loadFiletoBuff(file_in,&srcSize);
 
     ZDICT_fastCover_params_t fastCoverParams = defaultFastCoverParams();
     dictSize = DictionaryTrain_stream(dictBuffer,MaxDictSize,srcBuffer,srcSize,blockSize,&fastCoverParams);
@@ -388,52 +402,24 @@ int main(int argc,char* argv[]) {
     if ( dictSize == 0 ){
         printf("Training Dictionary Fail!\n");
     } 
-        // else{
-        //         FILE* fp_dict = fopen(train_dictFile,"wb");
-        //         if(fp_dict != NULL){
-        //             fwrite(dictBuffer,dictSize,1,fp_dict);
-        //             printf("Dictionaey size = %ld\n",dictSize);
-        //         }
-        //         else{
-        //             printf("Error:Save Dictionary File Fail!\n");
-        //         }
-        //         fclose(fp_dict);
-        // }
-        
-    
 
+    /* Stream Regular Compress. */
+    void *regOutBuffer = malloc(srcSize);   /* The regOutBuffer hasn't been used ,unless you want to save the compressed.*/
+    size_t regSize = RegularComp_Stream(srcBuffer,srcSize,regOutBuffer);
+    if ( regSize == 0) printf("Error\n");
+    printf("Regular Compress size = %ld\n",regSize);
+    
     /* Stream Dictionary Compress. */
-        // char *file_out = "/home/yonghui/dictSize/test_mydictComp/CHANGELOG.zst";
-        // char *file_in = "/home/yonghui/dictSize/test_mydictComp/CHANGELOG";
-        // char *file_dict = "/home/yonghui/dictSize/test_mydictComp/dict_CHANGELOG.bin";
-        // size_t srcSize;
-        // size_t dictSize;
-        // void *srcBuffer = mallocAndLoadFile_orDie(file_in,&srcSize);
-        // void *dictBuffer = mallocAndLoadFile_orDie(file_dict,&dictSize);
-    void *outBuffer = malloc(srcSize);
+    void *dictOutBuffer = malloc(srcSize);
     size_t outSize = 0;
-    outSize = Stream_zstd_dictComp(srcBuffer,srcSize,dictBuffer,dictSize,outBuffer);
+    outSize = DictionaryComp_Stream(srcBuffer,srcSize,dictBuffer,dictSize,dictOutBuffer);
+    if ( outSize == 0 ) printf("Error!\n");
     printf("Dictionary Compressed Size = %ld\n",outSize);
-    if ( outSize == 0 ){
-        printf("Error:Dictionary Compress Fail!\n");
-    }
-    // else{
-    //     FILE *fp_out = fopen(file_out,"wb");
-    //     printf("E");
-    //     if(fp_out != NULL){
-    //         printf("F");
-    //         fwrite(outBuffer,outSize,1,fp_out);
-    //         printf("G");
-    //     }
-    //     else{
-    //         printf("Save Compressed File Fail!\n");
-    //     }
-    //     fclose(fp_out);
-    // }
-    free(outBuffer);
+    
+    free(dictOutBuffer);
     free(srcBuffer);
     free(dictBuffer);
-    
+    free(regOutBuffer);
     
     return 0;
 }
