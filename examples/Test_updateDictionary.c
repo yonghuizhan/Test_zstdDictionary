@@ -25,6 +25,7 @@
 
 
 #define KB *(1<<10)
+#define MB *(1<<20)
 #define DICT_BUFFER_SIZE 32768
 #define MAX_DICTSIZE 112640      
 #define DEFAULT_ACCEL_TEST 1
@@ -282,21 +283,22 @@ static void *loadDictToCCtx(ZSTD_CCtx* cctx,const void *dict,size_t dictSize){
 /* Set samplesSizes.
     @return 1:error
             0 complete set samplesizes.*/
-int SetsamplesSizes(size_t srcSize,size_t blockSize,size_t* samplesSizes){
+static int SetsamplesSizes(size_t srcSize,size_t blockSize,size_t* samplesSizes){
 
     size_t const sSize = srcSize;
     size_t const bSize = blockSize;
     unsigned nbSamples = (int)((srcSize+bSize-1)/bSize);
     int nbSamplesLoaded = 0;
     size_t srcSizeDataLoaded = 0;
-    {
-        printf("srcSize = %ld\n",sSize);
-        printf("blockSize = %ld\n",blockSize);
-    }
+    int check = 0;
+    // {
+    //     printf("srcSize = %ld\n",sSize);
+    //     printf("blockSize = %ld\n",blockSize);
+    // }
     if ( (sSize <= 0) || (bSize <= 0) ){    /* Check srcsize and block size .*/
             if(sSize <= 0){printf("error:Sampledata size is zero or negative.\n");}
             if(bSize <=0){printf("error:BlockSize is zero or negative.\n");}
-            return 1;
+            check = 1;
         } 
     else{
         while ( (nbSamplesLoaded < nbSamples) && (srcSizeDataLoaded < sSize) ){
@@ -321,7 +323,7 @@ int SetsamplesSizes(size_t srcSize,size_t blockSize,size_t* samplesSizes){
     size_t count = 0;
     for (int i =0;(i < nbSamples) && (i < d);i++){
         size_t tempSize = samplesSizes[i];
-        if(tempSize != blockSize){
+        if(( tempSize != blockSize ) && ( i != nbSamples-1 )){
             printf("samplesLoaded [%d]  = %ld\n",i,tempSize);
             count++;
         }
@@ -329,12 +331,13 @@ int SetsamplesSizes(size_t srcSize,size_t blockSize,size_t* samplesSizes){
     if (count){
         printf("Total Nbsamples = %u\n",nbSamples);
         printf("Error SamplesSize Counts  = %ld\n",count);
-        }
+        check = 1;
+    }
     
-    return 0;
+    return check;
 }
 /* Get a Dictionary by training the sample data stream.*/
-static size_t  DictionaryTrain_stream(void* const outBuffer,size_t MaxOutSize,
+static size_t  DictionaryTrain_Stream(void* const outBuffer,size_t MaxOutSize,
                             void* srcBuffer,size_t srcSize,
                             size_t blockSize,ZDICT_fastCover_params_t *parameters)
 {
@@ -347,16 +350,18 @@ static size_t  DictionaryTrain_stream(void* const outBuffer,size_t MaxOutSize,
     size_t* sampleSizes;
     sampleSizes = (size_t*)calloc(nbSamples,sizeof(size_t));
     int check = SetsamplesSizes(srcSize,blockSize,sampleSizes);
-    if(check){return 0;}
+    
     /* Copy SamplesData to sampleBuffer. */
     memmove(sampleBuffer,srcBuffer,srcSize);
     if(strncmp(sampleBuffer,srcBuffer,srcSize)){
-        printf("Copy SamplesData to SampleBuffer Fail!\n");return 0;
+        printf("Copy SamplesData to SampleBuffer Fail!\n");
+        check = 1;
         }
+    if (!check){   
     dictSize = ZDICT_optimizeTrainFromBuffer_fastCover(dictBuffer, maxDictSize,
                                                               sampleBuffer, sampleSizes, nbSamples,
                                                               parameters);
-    
+    }
    
     free(sampleBuffer);
     free(sampleSizes);
@@ -400,44 +405,122 @@ static size_t RegularComp_Stream(void* srcBuffer,size_t srcSize,void* outBuffer)
     size_t outSize = outBuff.pos;
     return outSize;
 }
+// static int multiple_DictionaryTrain(void *){
+
+// }
+
 int main(int argc,char* argv[]) {
    
-   char *file_in = argv[1];
-      /* Stream Train Dictionary.*/
+    char *file_in = argv[1];
     size_t MaxDictSize = MAX_DICTSIZE;
     size_t blockSize = 4096;
     size_t srcSize;
-    size_t dictSize;
-    void* dictBuffer = malloc(MaxDictSize);
-    // void* const dictBuffer;
+    
     void*  srcBuffer = loadFiletoBuff(file_in,&srcSize);
-
-    ZDICT_fastCover_params_t fastCoverParams = defaultFastCoverParams();
-    dictSize = DictionaryTrain_stream(dictBuffer,MaxDictSize,srcBuffer,srcSize,blockSize,&fastCoverParams);
-    
-    printf("Source size  = %ld\n",srcSize);
-    printf("Dictionary Size = %ld\n",dictSize);
-    if ( dictSize == 0 ){
-        printf("Training Dictionary Fail!\n");
-    } 
-
-        // /* Stream Regular Compress. */
-        // void *regOutBuffer = malloc(srcSize);   /* The regOutBuffer hasn't been used ,unless you want to save the compressed.*/
-        // size_t regSize = RegularComp_Stream(srcBuffer,srcSize,regOutBuffer);
-        // if ( regSize == 0) printf("Error\n");
-        // printf("Regular Compress size = %ld\n",regSize);
+    size_t compSize = 10 MB;
+    size_t trainSize = 2 MB;
+    size_t totalConsumeSize = 0; 
+    // void *CompBuffer = malloc(compSize);
+    // 
+    size_t dictCompressSize = 0;
+    // size_t regCompressSize = 0;
+    printf("srcSize = %ld\n",srcSize);
+    while ( totalConsumeSize < srcSize ){   
+        void *dictBuffer = malloc(MAX_DICTSIZE);
+        size_t dictSize = 0;
+        void* TrainBuffer = malloc(trainSize);
+        printf("Total cunsum data is %ld\n",totalConsumeSize);
         
-        // /* Stream Dictionary Compress. */
-        // void *dictOutBuffer = malloc(srcSize);
-        // size_t outSize = 0;
-        // outSize = DictionaryComp_Stream(srcBuffer,srcSize,dictBuffer,dictSize,dictOutBuffer);
-        // if ( outSize == 0 ) printf("Error!\n");
-        // printf("Dictionary Compressed Size = %ld\n",outSize);
-        // free(regOutBuffer);
-        // free(dictOutBuffer);
-    
+        // printf("Train size = %ld\n",trainSize);
+        if ( (srcSize - totalConsumeSize) >= (2*trainSize) ){
+            memcpy(TrainBuffer,srcBuffer+totalConsumeSize,trainSize);
+            totalConsumeSize += trainSize;
+            ZDICT_fastCover_params_t fastCoverParams = defaultFastCoverParams();
+            dictSize = DictionaryTrain_Stream(dictBuffer,MAX_DICTSIZE,
+                                                TrainBuffer,trainSize,blockSize,
+                                                &fastCoverParams);
+            printf("Train size  = %ld\n",trainSize);
+            printf("Dictionary Size = %ld\n",dictSize);
+            if ( dictSize == 0 ){
+                printf("Training Dictionary Fail!\n");
+
+            }
+        }
+        /* Dictionary compression is performed when the dictionary size is greater than 0. */
+        if ( (dictSize > 0) && (dictSize <= MaxDictSize) ){
+            size_t cSize = MIN((srcSize-totalConsumeSize),compSize);
+            void *cBuffer = malloc(cSize);
+            size_t tLoad = totalConsumeSize - trainSize;
+            memcpy(cBuffer,srcBuffer+tLoad,cSize);
+            totalConsumeSize += cSize;
+            /* Set Chunks. */
+            size_t nb = ((cSize+blockSize-1)/blockSize);
+            size_t *SamplesSize = calloc(nb,sizeof(size_t));
+            int check = SetsamplesSizes(cSize,blockSize,SamplesSize);
+            if (check){
+                free (cBuffer);
+                free(TrainBuffer);
+                free(dictBuffer);
+                break;
+            } 
+            size_t tempConsumeSize = 0;
+            /* Dictionary Compress each chunk. */
+            for (int i =0;i < nb;i++){
+                if ((tempConsumeSize >= cSize) || (tempConsumeSize < 0)){
+                    free(SamplesSize);
+                    free(TrainBuffer);
+                    free(dictBuffer);
+                    free (cBuffer);
+                        break;
+                } 
+                void *tempCbuffer = malloc(SamplesSize[i]);
+                memcpy(tempCbuffer,cBuffer+tempConsumeSize,SamplesSize[i]);
+                
+                void *oBuffer = malloc(blockSize);
+                dictCompressSize += DictionaryComp_Stream(tempCbuffer,SamplesSize[i],dictBuffer,dictSize,oBuffer);
+                
+                tempConsumeSize +=SamplesSize[i];
+                free(tempCbuffer);
+                free(oBuffer);
+            }
+            free(SamplesSize);
+            free(cBuffer);
+        }
+        if ( (dictSize < 0) || (dictSize > MaxDictSize)){
+            printf("Error:A failure occurred during dictionary training. \n ");
+            printf("Dictionary Size  = %ld \n ",dictSize);
+            printf("The data consumed is %ld \n",totalConsumeSize);
+            free(TrainBuffer);
+            free(dictBuffer);
+            break;
+        }
+        free(TrainBuffer);
+        free(dictBuffer);
+        printf("\n");
+    }
+    printf("Dictionary compressed size = %ld \n",dictCompressSize);
     free(srcBuffer);
-    free(dictBuffer);
+    
+
+    // /* Stream Regular Compress. */
+    // void *regOutBuffer = malloc(srcSize);   /* The regOutBuffer hasn't been used ,unless you want to save the compressed data.*/
+    // size_t regSize = RegularComp_Stream(srcBuffer,srcSize,regOutBuffer);
+    // if ( regSize == 0 ) printf("Error\n");
+    // printf("Regular Compress size = %ld\n",regSize);
+    
+    // /* Stream Dictionary Compress. */
+    // void *dictOutBuffer = malloc(srcSize);
+    // size_t outSize = 0;
+    // outSize = DictionaryComp_Stream(srcBuffer,srcSize,
+    //                                     dictBuffer,dictSize,
+    //                                     dictOutBuffer);
+    // if ( outSize == 0 ) printf("Error!\n");
+    // printf("Dictionary Compressed Size = %ld\n",outSize);
+    // free(regOutBuffer);
+    // free(dictOutBuffer);
+    
+    // free(srcBuffer);
+    // // free(dictBuffer);
     
     
     return 0;
