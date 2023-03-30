@@ -98,7 +98,7 @@ OBJ = ../programs/obj/conf_aec26574c336b900571a5deec4052692/util.o \
 ../programs/obj/conf_aec26574c336b900571a5deec4052692/dibio.o \
 ../programs/obj/conf_aec26574c336b900571a5deec4052692/timefn.o \
 Test_updateDictionary.o
-LDFLAGS = -L../lib/ -lzstd
+LDFLAGS = -L../lib/ -lzstd -lpthread
 CFLAGS = -c -g  -Wall
 $(TARGET): $(OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS)
