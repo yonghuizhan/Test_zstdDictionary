@@ -62,7 +62,7 @@ typedef struct pthread_train_compress
     size_t exitThread;
 }TC_params;
 TC_params tc_params;    /* Galobal paramter for Train and Compress. */
-
+void TC_params_free(TC_params *tc_p);
 static ZDICT_fastCover_params_t defaultFastCoverParams(void);
 /* Set samplessizes. */
 static int SetsamplesSizes(size_t srcSize,size_t blockSize,size_t* samplesSizes);
@@ -386,6 +386,7 @@ static size_t DC_Stream(TC_params *tc_parameters){
             break;
         }
         printf("Dictionary hasn't finished.\n");
+        
         pthread_cond_wait(&tc_parameters->dictComp,&tc_parameters->lock);
         printf("\nBack to Compress!!!\n");
     }
@@ -439,7 +440,7 @@ static size_t DC_Stream(TC_params *tc_parameters){
             /* Compress data used to training. */
             cSize += tc_parameters->temptSize;  
         }
-        printf("DictCompress position start =%ld",position);
+        printf("DictCompress position start =%ld\n",position);
         if ( memmove(cBuffer,tc_parameters->srcBuffer+position,cSize) == NULL ){
             printf("Error DictCompress: Copy data to cBuffer Fail!\n");
             tc_parameters->exitThread = 1;
@@ -488,8 +489,9 @@ static size_t DC_Stream(TC_params *tc_parameters){
         }
         result += dictCompressSize;
         tc_parameters->totalConsumedSize += cSize;
+        printf("DictCompress Loop: This time consumed data size = %ld\n",cSize);
         printf("DictCompress Loop: Compressed size = %ld\n",dictCompressSize);
-        printf("DictCompress Loop: ConsumedSize = %ld\n",tc_parameters->totalConsumedSize);
+        printf("DictCompress Loop: Total ConsumedSize = %ld\n",tc_parameters->totalConsumedSize);
         tc_parameters->dict_Exist = 0;
         tc_parameters->trainNewDict = 0;
         free(SamplesSize);
@@ -601,11 +603,18 @@ static void* multiple_DictionaryCompress_stream(void *tc_p)
             dictCompressSize += check;
         }
     }
+    double ration = (srcSize*1.0/dictCompressSize);
+    printf("Source size  = %ld\n",srcSize);
     printf("Dictionary Compress Size = %ld\n",dictCompressSize);
+    printf("Compress Ration: %f\n",ration);
     printf("Finish Compress!\nExit.\n\n");
     // return dictCompressSize;
 }
-
+void TC_params_free(TC_params *tc_p){
+    free(tc_p->dictBuffer);
+    free(tc_p->srcBuffer);
+    free(tc_p->dictBuffer_old);
+}
 int main(int argc,char* argv[]) {
     // int check = 1;
     char *file_in = argv[1];
@@ -619,10 +628,16 @@ int main(int argc,char* argv[]) {
     // size_t totalConsumeSize = 0;    /* Data size has been consumed. */
     // size_t dictCompressSize = 0;    /* Data size compressed with dictionary. */
     // size_t regCOmpressSize = 0;
-
+    if (srcSize < trainChunkSize)
+    {
+        printf("Source size is too samll,at least > 2 MB");
+        free(srcBuffer);
+        return 0;
+    }
     if (initalize_TC_params(&tc_params,srcBuffer,srcSize,MAX_DICTSIZE,blockSize,compressChunkSize,trainChunkSize) != 0){
         printf("Initalize TC_paramters Fail!!!\n");
         free(srcBuffer);
+        TC_params_free(&tc_params);
         return 0;
     }
 

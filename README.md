@@ -28,4 +28,10 @@ examples/Test_updateDictionary.c.
 ./Test_updateDictionary File
 ~~~
 
-It will print Dictionary Size , Source Size and Compressed Size to the screen.
+The program will print :
+
+Source size:
+
+Dictionary Compress size:
+
+Dictionary Compress Ration:
