@@ -32,6 +32,7 @@
 #define DEFAULT_ACCEL_TEST 1
 #define SAMPLESIZE_MAX (128 KB)
 #define MIN(a,b)    ((a) < (b) ? (a) : (b))
+#define DiB_rotl32_1(x,r) ((x << r) | (x >> (32 - r)))
 #define DISPLAYLEVEL 2
 #define CLEVEL  3
 static const unsigned kDefaultRegression = 1;
@@ -57,8 +58,9 @@ typedef struct pthread_train_compress
     size_t blockSize;           /* Compress and Train blocksize. */
     size_t tempcSize;           /* Compress chunksize.*/
     size_t temptSize;           /*Train chunksize.*/
-    size_t trainNewDict;        /* 1: Train new dictionary.
-                                    0: Use the old dictionary.*/
+    // size_t trainNewDict;        /* 1: Train new dictionary.
+    //                                 0: Use the old dictionary.*/
+    size_t trainConsumed;
     size_t exitThread;
 }TC_params;
 TC_params tc_params;    /* Galobal paramter for Train and Compress. */
@@ -83,10 +85,15 @@ static void* multiple_DictionaryCompress_stream(void  *tc_parameters);
 static void *multiple_DictionaryTrain_stream(void *tc_parameters);
 
 /* Dictionary Compress function. */
-static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* dictBuffer,size_t dictSize,void* OutBuffer);
+static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* OutBuffer,ZSTD_CCtx* cctx);
+// static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* dictBuffer,size_t dictSize,void* OutBuffer);
 /* Initalize TC_params */
 static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,size_t MaxDictSize,
                                 size_t blockSize,size_t compressChunkSize,size_t trainChunkSize);
+
+
+static U32 DiB_rand_(U32* src);
+static int Random_LoadTrainBuffer(size_t trainSize,size_t blockSize,size_t endPosition,size_t *samplePosition);
 
 static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,size_t MaxDictSize,
                                 size_t blockSize,size_t compressChunkSize,size_t trainChunkSize)
@@ -105,7 +112,7 @@ static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,si
     tc_p->totalConsumedSize = 0;            /* Consumed data size. */
     tc_p->dict_Exist = 0;                    /* Does the  dictionary exist. */
     tc_p->trainDict_Break = 0;              /* Whether */
-    tc_p->trainNewDict = 0;
+    // tc_p->trainNewDict = 0;
     tc_p->dictBuffer = calloc(MaxDictSize,sizeof(char));
     tc_p->dictBuffer_old = calloc(MaxDictSize,sizeof(char));
     tc_p->srcBuffer = calloc(srcSize,sizeof(char));
@@ -262,10 +269,46 @@ static int SetsamplesSizes(size_t srcSize,size_t blockSize,size_t* samplesSizes)
     
     return check;
 }
+
+static U32 DiB_rand_(U32* src)
+{
+    static const U32 prime1 = 2654435761U;
+    static const U32 prime2 = 2246822519U;
+    U32 rand32 = *src;
+    rand32 *= prime1;
+    rand32 ^= prime2;
+    rand32  = DiB_rotl32_1(rand32, 13);
+    *src = rand32;
+    return rand32 >> 5;
+}
+static int Random_LoadTrainBuffer(size_t trainSize,size_t blockSize,size_t endPosition,size_t *samplePosition)
+{
+    int nbSamples = (int)((trainSize+blockSize-1)/blockSize);
+    int i = 0;
+    int chunkSize = endPosition/nbSamples;
+    U32 seed = 0xFD2FB528;
+    if ( endPosition < trainSize ){
+        printf("Error : Reaming data is not enough for generating a new dictionary!!!\n");
+        return -1;
+    }
+    for(i=0;i < nbSamples;i++){
+        samplePosition[i] = DiB_rand_(&seed)%(chunkSize)+chunkSize*i;
+        if ( (endPosition-samplePosition[i]) < blockSize) {
+            samplePosition[i] = samplePosition[i] - blockSize;
+        }
+        if ( samplePosition[i] > endPosition ) {
+            printf("Random Loading data into train buffer fail.!");
+            return -1;
+        }
+    }
+    printf("Train Loop: Random Load into TrainBuffer.\n");
+    return 0;
+}
 /* Get a Dictionary by training the sample data stream.*/
 static size_t  DictionaryTrain_Stream(TC_params *tc_parameters,ZDICT_fastCover_params_t *parameters)
 {    
     size_t result = 0;
+    
     pthread_mutex_lock(&tc_parameters->lock);
     while ( tc_parameters->dict_Exist == 1 )
     {
@@ -285,59 +328,73 @@ static size_t  DictionaryTrain_Stream(TC_params *tc_parameters,ZDICT_fastCover_p
     }
     /* If the remaining data is enough to generate a dictionary, continue training. */
     else{
-            int check_1 =1;
-            size_t MaxDictSize = tc_parameters->MaxDictSize;
-            void*  dictBuffer = malloc(MaxDictSize);  
-            size_t dictSize = 0;
-            size_t trainChunkSize = tc_parameters->temptSize;
-            size_t blockSize = tc_parameters->blockSize;
-            void* sampleBuffer = malloc(tc_parameters->temptSize+32);
-            
-            /* Set samplesSizes .*/
-            int nbSamples = (int)((trainChunkSize+blockSize-1)/blockSize);
-            if (check_1){
-                printf("Train dictSize = %ld\n",MaxDictSize);
-                printf("Train source size = %ld\n",trainChunkSize);
-                printf("Train blocksize = %ld\n",blockSize);
-                printf("\n");
+        int check_1 =0;
+        size_t MaxDictSize = tc_parameters->MaxDictSize;
+        void*  dictBuffer = malloc(MaxDictSize);  
+        size_t dictSize = 0;
+        size_t trainChunkSize = tc_parameters->temptSize;
+        size_t blockSize = tc_parameters->blockSize;
+        void* sampleBuffer = malloc(tc_parameters->temptSize+32);
+        
+        /* Set samplesSizes .*/
+        int nbSamples = (int)((trainChunkSize+blockSize-1)/blockSize);
+        if (check_1){
+            printf("Train dictSize = %ld\n",MaxDictSize);
+            printf("Train source size = %ld\n",trainChunkSize);
+            printf("Train blocksize = %ld\n",blockSize);
+            printf("\n");
+        }
+        /* Copy SamplesData to sampleBuffer. */
+        // if ( memmove(sampleBuffer,tc_parameters->srcBuffer+tc_parameters->totalConsumedSize,trainChunkSize) == NULL ){
+        //     printf("Error Train: Train buffer copy fail.\n");
+        //     result = -1;
+        // }
+        size_t *samplePosition;
+        samplePosition = (size_t*)calloc(nbSamples,sizeof(size_t));
+        size_t endPosition = MIN((tc_parameters->srcSize - tc_parameters->totalConsumedSize),tc_parameters->tempcSize);
+        int check_randLoad = Random_LoadTrainBuffer(trainChunkSize,blockSize,endPosition,samplePosition);
+        size_t* sampleSizes;
+        sampleSizes = (size_t*)calloc(nbSamples,sizeof(size_t));
+        int check = SetsamplesSizes(trainChunkSize,blockSize,sampleSizes);
+        if (check != 0){
+            printf("Error: Set samplesSize Fail!!!\n");
+            result = -1;
+        }
+        int i = 0;
+        size_t samplebufferPosition = 0;
+        size_t position = tc_parameters->totalConsumedSize;
+        for(i=0;i<nbSamples;i++){
+            if (memmove(sampleBuffer+samplebufferPosition,tc_parameters->srcBuffer+position+samplePosition[i],sampleSizes[i]) == NULL){
+                    printf("Error: Copy train buffer fail!!!\n");
             }
-            /* Copy SamplesData to sampleBuffer. */
-            if ( memmove(sampleBuffer,tc_parameters->srcBuffer+tc_parameters->totalConsumedSize,trainChunkSize) == NULL ){
-                printf("Error Train: Train buffer copy fail.\n");
+            samplebufferPosition += sampleSizes [i];
+            // position += sampleSizes[i];
+        }
+        printf("Train Loop: Start training.\n");
+        dictSize = ZDICT_optimizeTrainFromBuffer_fastCover(dictBuffer, MaxDictSize,
+                                                                sampleBuffer, sampleSizes, nbSamples,
+                                                                parameters);
+        if ( (dictSize > 0) && (dictSize <= MAX_DICTSIZE) ){
+            printf("Train Loop: Dictionary Size = %ld.\n",dictSize);
+            tc_parameters->dictSize_old = tc_parameters->dictSize;
+            if ( memmove(tc_parameters->dictBuffer_old,tc_parameters->dictBuffer,tc_parameters->dictSize) == NULL ){
+                printf("Error Train:Copy tc_parameters->dictBuffer to tc_parameters->dictBuffer_old Fail!!!\n");
                 result = -1;
             }
-            size_t* sampleSizes;
-            sampleSizes = (size_t*)calloc(nbSamples,sizeof(size_t));
-            int check = SetsamplesSizes(trainChunkSize,blockSize,sampleSizes);
-            if (check != 0){
-                printf("Error: Set samplesSize Fail!!!\n");
+            tc_parameters->dictSize = dictSize;
+            if ( memmove(tc_parameters->dictBuffer,dictBuffer,dictSize) == NULL ){
+                printf("Error Train:Copy dictBuffer to tc_parameters Fail!!!\n");
                 result = -1;
             }
-            dictSize = ZDICT_optimizeTrainFromBuffer_fastCover(dictBuffer, MaxDictSize,
-                                                                    sampleBuffer, sampleSizes, nbSamples,
-                                                                    parameters);
-            if ( (dictSize > 0) && (dictSize <= MAX_DICTSIZE) ){
-                if ( memmove(tc_parameters->dictBuffer,dictBuffer,dictSize) == NULL ){
-                    printf("Error Train:Copy dictBuffer to tc_parameters Fail!!!\n");
-                    result = -1;
-                }
-                else {
-                    tc_parameters->dictSize = dictSize;
-                    if ( memmove(tc_parameters->dictBuffer_old,tc_parameters->dictBuffer,dictSize) == NULL ){
-                        printf("Error Train: Copy dictBuffer to dictBuffer_old Fail!!!\n");
-                    }
-                    else {}
-                }
-            }
-            else{
-                printf("Error Train: Train Dictionary Fail!!!\nDictionary size = %ld\n",dictSize);
-                result = -1;
-            }
-            
-            free(dictBuffer);
-            printf("Train Loop: ConsumedSize = %ld\n",tc_parameters->totalConsumedSize);
-            printf("Remaining = %ld\n",(tc_parameters->srcSize)-(tc_parameters->totalConsumedSize));
-            tc_parameters->dict_Exist = 1;
+        }
+        else{
+            printf("Error Train: Train Dictionary Fail!!!\nDictionary size = %ld\n",dictSize);
+            result = -1;
+        }
+        free(dictBuffer);
+        printf("Train Loop: ConsumedSize = %ld\n",tc_parameters->totalConsumedSize);
+        printf("Train Loop Remain = %ld\n",(tc_parameters->srcSize)-(tc_parameters->totalConsumedSize));
+        tc_parameters->dict_Exist = 1;
     }
     if (tc_parameters->trainDict_Break == -1){
         printf("Remaining data size isn't enough for training a new dictionary.\n");
@@ -346,31 +403,33 @@ static size_t  DictionaryTrain_Stream(TC_params *tc_parameters,ZDICT_fastCover_p
     if (result == -1){
         tc_parameters->trainDict_Break = -1;
     }
+
     pthread_cond_signal(&tc_parameters->dictComp);
     pthread_mutex_unlock(&tc_parameters->lock);
     printf("Train trainDict_Break = %ld\n",tc_parameters->trainDict_Break);
     return result;
 }
-static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* dictBuffer,size_t dictSize,void* OutBuffer){
+static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* OutBuffer,ZSTD_CCtx* cctx)
+// static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* dictBuffer,size_t dictSize,void* OutBuffer)
+{
 
     void *srcBuff = srcBuffer;
-    void *dictBuff = dictBuffer;
+    // void *dictBuff = dictBuffer;
     size_t outSize = srcSize;
     void  *outBuffer = OutBuffer;
-    size_t dictsize = dictSize;
+    // size_t dictsize = dictSize;
     // outBuffer = malloc_orDie(outSize);
     /*HHHH*/
-    ZSTD_CCtx* cctx = ZSTD_createCCtx();
     /* Load dict into cctx localDict */
-    loadDictToCCtx(cctx,dictBuff,dictsize);
+    // ZSTD_CCtx* cctx = ZSTD_createCCtx();
+    // loadDictToCCtx(cctx,dictBuff,dictsize);
 
     /*Compress srcBuff*/
     ZSTD_inBuffer inBuff = { srcBuff, srcSize, 0 };
     ZSTD_outBuffer outBuff= { outBuffer, outSize, 0 };
     ZSTD_compressStream2(cctx, &outBuff, &inBuff, ZSTD_e_end);
-    outSize =outBuff.pos;
-    
-    ZSTD_freeCCtx(cctx);
+    outSize = outBuff.pos;
+    // ZSTD_freeCCtx(cctx);
     return outSize;
 } 
 static size_t DC_Stream(TC_params *tc_parameters){
@@ -386,7 +445,6 @@ static size_t DC_Stream(TC_params *tc_parameters){
             break;
         }
         printf("Dictionary hasn't finished.\n");
-        
         pthread_cond_wait(&tc_parameters->dictComp,&tc_parameters->lock);
         printf("\nBack to Compress!!!\n");
     }
@@ -396,21 +454,9 @@ static size_t DC_Stream(TC_params *tc_parameters){
         size_t dictSize = 0;
         void *cBuffer = calloc(tc_parameters->tempcSize,sizeof(char));
         /* Copy dictionary  to dictBuffer. */
-        if ( tc_parameters->trainNewDict == 1 ){
-            dictSize = tc_parameters->dictSize;
-            if ( memmove(dictBuffer,tc_parameters->dictBuffer,tc_parameters->dictSize) == NULL){
-            printf("Error DictCompress: Copy dictBuffer Fail!\n");
-            tc_parameters->exitThread = 1;
-            free(dictBuffer);
-            free(cBuffer);
-            pthread_cond_signal(&tc_parameters->updateDict);
-            pthread_mutex_unlock(&tc_parameters->lock);
-            return -1;
-            }
-        }
-        else{
-            dictSize = tc_parameters->dictSize_old;
-            if ( memmove(dictBuffer,tc_parameters->dictBuffer_old,tc_parameters->dictSize_old) == NULL){
+
+        dictSize = tc_parameters->dictSize_old;
+        if ( memmove(dictBuffer,tc_parameters->dictBuffer_old,tc_parameters->dictSize_old) == NULL){
             printf("Error DictCompress: Copy dictBuffer_old Fail!\n");
             tc_parameters->exitThread = 1;
             free(dictBuffer);
@@ -418,28 +464,11 @@ static size_t DC_Stream(TC_params *tc_parameters){
             pthread_cond_signal(&tc_parameters->updateDict);
             pthread_mutex_unlock(&tc_parameters->lock);
             return -1;
-            }
         }
-
         /* Copy data to cBuffer waitting compressing. */
-        size_t tempCheck = tc_parameters->totalConsumedSize - tc_parameters->temptSize;
         size_t cSize = MIN((tc_parameters->srcSize - tc_parameters->totalConsumedSize),
-                                (tc_parameters->tempcSize - tc_parameters->temptSize));
-        size_t position = 0;
-        if ( tempCheck >= 0 ){
-             /* Check if generate a new dictionary.
-                If not,start compressing on position totalConsumedSize */
-            if ( tc_parameters->trainNewDict == 1){
-                position = tempCheck;
-            }
-            else{
-                position = tc_parameters->totalConsumedSize;
-            }
-        }
-        if ( (tc_parameters->srcSize - tc_parameters->totalConsumedSize) > tc_parameters->tempcSize ) {
-            /* Compress data used to training. */
-            cSize += tc_parameters->temptSize;  
-        }
+                                tc_parameters->tempcSize );
+        size_t position = tc_parameters->totalConsumedSize;
         printf("DictCompress position start =%ld\n",position);
         if ( memmove(cBuffer,tc_parameters->srcBuffer+position,cSize) == NULL ){
             printf("Error DictCompress: Copy data to cBuffer Fail!\n");
@@ -466,12 +495,15 @@ static size_t DC_Stream(TC_params *tc_parameters){
         } 
         size_t tempConsumeSize = 0;
         size_t dictCompressSize = 0;
+        ZSTD_CCtx* cctx = ZSTD_createCCtx();
+        loadDictToCCtx(cctx,dictBuffer,dictSize);
         /* Dictionary Compress each chunk. */
         for (int i = 0;i < nb;i++){
             if ((tempConsumeSize >= cSize) || (tempConsumeSize < 0)){
                 free(SamplesSize);
                 free(dictBuffer);
                 free (cBuffer);
+                ZSTD_freeCCtx(cctx);
                 tc_parameters->exitThread = 1;
                 pthread_cond_signal(&tc_parameters->updateDict);
                 pthread_mutex_unlock(&tc_parameters->lock);
@@ -481,24 +513,26 @@ static size_t DC_Stream(TC_params *tc_parameters){
             memcpy(tempCbuffer,cBuffer+tempConsumeSize,SamplesSize[i]);
             
             void *oBuffer = malloc(blocksize);
-            dictCompressSize += DictionaryComp_Stream(tempCbuffer,SamplesSize[i],dictBuffer,dictSize,oBuffer);
-            
+            dictCompressSize += DictionaryComp_Stream(tempCbuffer,SamplesSize[i],oBuffer,cctx);
+            // dictCompressSize += DictionaryComp_Stream(tempCbuffer,SamplesSize[i],dictBuffer,dictSize,oBuffer);
             tempConsumeSize +=SamplesSize[i];
             free(tempCbuffer);
             free(oBuffer);
         }
-        result += dictCompressSize;
+        ZSTD_freeCCtx(cctx);
+        result = dictCompressSize;
         tc_parameters->totalConsumedSize += cSize;
         printf("DictCompress Loop: This time consumed data size = %ld\n",cSize);
         printf("DictCompress Loop: Compressed size = %ld\n",dictCompressSize);
         printf("DictCompress Loop: Total ConsumedSize = %ld\n",tc_parameters->totalConsumedSize);
         tc_parameters->dict_Exist = 0;
-        tc_parameters->trainNewDict = 0;
+       
         free(SamplesSize);
         free(dictBuffer);
         free(cBuffer);
     }
     else{
+        printf("Dictionary Compress Finish.\n");
         result = -1;
     }
     pthread_cond_signal(&tc_parameters->updateDict);
@@ -507,40 +541,56 @@ static size_t DC_Stream(TC_params *tc_parameters){
     printf("Remaining data size = %ld\n",((tc_parameters->srcSize)-(tc_parameters->totalConsumedSize)));
     return result;
 } 
-/* Regualr Compress the srcBuffer given,and return the compressed size.*/
-// static size_t RegularComp_Stream(void* srcBuffer,size_t srcSize,void* outBuffer)
-// static size_t RegularComp_Stream(REG_compress_params regParams)
+/* Regualr Compress the srcBuffer given,and return the compressed size.
+    blockSize = 0 ,compress data at one time without chunking. */
+// static size_t RegularComp_Stream(void* srcBuffer,size_t srcSize,void* outBuffer,size_t blockSize)
 // {   
-//     void *buffIn = regParams.srcBuffer;
-//     size_t sSize = regParams.srcSize;
-//     void *outBuffer = regParams.outBuffer;
-//     size_t *dictSize = regParams.dictsize;
-//     size_t chunksize = regParams.chunkSize;
-//     size_t nbchunk = sSize/regParams.chunkSize;
-//     size_t blocksize = regParams.blockSize;
-//     size_t totalConsumedSize = 0;
-//     int nb = 0;
-//     while ( nb <= nbchunk){
-//         if (*dictSize == 0){
-//             size_t tempCompSize = MIN((sSize - totalConsumedSize),chunksize);
-//             size_t nbsamples = 0;
-//             size_t *sampleSizes = calloc(0,0);
-//             ZSTD_inBuffer inBuff = { buffIn, sSize, 0 };
-//             ZSTD_outBuffer outBuff= { outBuffer, sSize, 0 };
+//     void *buffIn = srcBuffer;
+//     // void *outBuffer = outBuffer;
+//     size_t outSize = 0;
+//     if (blockSize > 0 ){
+//         int nbSamples =  (int)((srcSize+blockSize-1)/blockSize);
+//         size_t *samplesSize = calloc(nbSamples,sizeof(size_t));
+//         int check = SetsamplesSizes(srcSize,blockSize,samplesSize);
+//         if (check){
+//             printf("Error: Regular ,Set samplesSize fail!!!\n");
+//             free(samplesSize);
+//             return -1;
+//         }
+//         int i = 0;
+//         size_t position = 0;
+//         for (i;i < nbSamples; i++){
+//             ZSTD_inBuffer inBuff = { buffIn+position, samplesSize[i], 0 };
+//             ZSTD_outBuffer outBuff= { outBuffer+outSize, blockSize, 0 };
+//             ZSTD_CCtx* const cctx = ZSTD_createCCtx();
+//             ZSTD_EndDirective const mode = ZSTD_e_end;
+//             /* If all the input data is been consumed ,return 0.*/
+//             size_t remaining = ZSTD_compressStream2(cctx,&outBuff,&inBuff,mode);
+//             position += samplesSize[i];
+//             if (remaining){
+//                 printf("Data is not fully compressed!\n");
+//                 printf("Remaining = %ld\n",remaining);
+//             }
+//             outSize += outBuff.pos;
+//         }
+//         free(samplesSize);
+//     }
+//     if (blockSize == 0 ){
+//             ZSTD_inBuffer inBuff = { buffIn, srcSize, 0 };
+//             ZSTD_outBuffer outBuff= { outBuffer, srcSize, 0 };
 //             ZSTD_CCtx* const cctx = ZSTD_createCCtx();
 //             ZSTD_EndDirective const mode = ZSTD_e_end;
 //             /* If all the input data is been consumed ,return 0.*/
 //             size_t remaining = ZSTD_compressStream2(cctx,&outBuff,&inBuff,mode);
 //             if (remaining){
-//                 printf("Don't compress the data stream completely!\n");
+//                 printf("Data is not fully compressed!\n");
 //                 printf("Remaining = %ld\n",remaining);
 //             }
-//             size_t outSize = outBuff.pos;
-//             return outSize;
-//         }
+//             outSize = outBuff.pos;
 //     }
-    
-    
+//     if (blockSize < 0 )
+//         printf("BlockSize is negative,please set a blockSize > 0!!!\n");
+//     return outSize;
 // }
 
 static void* multiple_DictionaryTrain_stream(void* tc_p){
@@ -573,23 +623,23 @@ static void* multiple_DictionaryTrain_stream(void* tc_p){
         if (dictSize == -1) break;
     }     
     printf("Finish training program!\nExit.\n\n");                                    
-    
+    return 0;
 }
 static void* multiple_DictionaryCompress_stream(void *tc_p)
 {   
     TC_params *tc_parameters = (TC_params *)(tc_p);
     size_t srcSize = tc_parameters->srcSize;
     // size_t totalConsumeSize = 0;
-    size_t compchunkSize = tc_parameters->tempcSize;
-    size_t trainSize = tc_parameters->temptSize;
-    size_t blocksize = tc_parameters->blockSize;
+    // size_t compchunkSize = tc_parameters->tempcSize;
+    // size_t trainSize = tc_parameters->temptSize;
+    // size_t blocksize = tc_parameters->blockSize;
     size_t dictCompressSize = 0;
     printf("Compress: srcSize = %ld\n",tc_parameters->srcSize);
     printf("Compress: blockSize = %ld\n",tc_parameters->blockSize);
     printf("Compress: totalconsumedsize = %ld\n",tc_parameters->totalConsumedSize);
     int i = 0;
     size_t check = 0;
-    size_t nbchunk = srcSize/(compchunkSize);
+    // size_t nbchunk = srcSize/(compchunkSize);
     while ( 1 )
     {
         printf("\nHers is dictcompress loop.\n");
@@ -608,12 +658,16 @@ static void* multiple_DictionaryCompress_stream(void *tc_p)
     printf("Dictionary Compress Size = %ld\n",dictCompressSize);
     printf("Compress Ration: %f\n",ration);
     printf("Finish Compress!\nExit.\n\n");
+    return 0;
     // return dictCompressSize;
 }
 void TC_params_free(TC_params *tc_p){
     free(tc_p->dictBuffer);
     free(tc_p->srcBuffer);
     free(tc_p->dictBuffer_old);
+    pthread_mutex_destroy(&tc_p->lock);
+    pthread_cond_destroy(&tc_p->dictComp);
+    pthread_cond_destroy(&tc_p->updateDict);
 }
 int main(int argc,char* argv[]) {
     // int check = 1;
@@ -645,21 +699,11 @@ int main(int argc,char* argv[]) {
     /* Dictionary Train. */
     pthread_create(&th_train,NULL,multiple_DictionaryTrain_stream,(void*)(&tc_params));
     pthread_create(&th_dictcomp,NULL,multiple_DictionaryCompress_stream,(void*)(&tc_params));
-               
-        // /* Regular Compress. */
-        // void *regOutBuffer = malloc(compSize);
-        // REG_compress_params regParams = initalRegCompressParams(srcBuffer,srcSize,&dictSize,compSize,blockSize,regOutBuffer);
-        // pthread_create(&th_regcomp,NULL,RegularComp_Stream,&regParams);
-        // // printf("Source size = %ld\n",srcSize);
-        // if ( (dictSize < 0) || (dictSize > MaxDictSize)){
-        //     printf("Error:A failure occurred during dictionary training. \n ");
-        //     printf("Dictionary Size  = %ld \n ",dictSize);
-        //     printf("The data consumed is %ld \n",totalConsumeSize);
-        // }
         
     pthread_join(th_train,NULL);
     pthread_join(th_dictcomp,NULL);
     // pthread_join(th_regcomp,NULL);
+    TC_params_free(&tc_params);
     free(srcBuffer);
     
     return 0;

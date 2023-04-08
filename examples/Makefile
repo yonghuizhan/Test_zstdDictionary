@@ -108,3 +108,21 @@ Test_updateDictionary.o:Test_updateDictionary.c
 .PHONY: clean 
 clean:
 	rm -f Test_updateDictionary.o $(TARGET)
+
+# CC = gcc
+# TARGET = test8_withoutThread
+# SRC = test8_withoutThread.c
+# OBJ = ../programs/obj/conf_aec26574c336b900571a5deec4052692/util.o \
+# ../programs/obj/conf_aec26574c336b900571a5deec4052692/dibio.o \
+# ../programs/obj/conf_aec26574c336b900571a5deec4052692/timefn.o \
+# test8_withoutThread.o
+# LDFLAGS = -L../lib/ -lzstd 
+# CFLAGS = -c -g  -Wall
+# $(TARGET): $(OBJ)
+# 	$(CC) -o $@ $^ $(LDFLAGS)
+# test8_withoutThread.o:test8_withoutThread.c
+# 	$(CC) $(CFLAGS) $< -o $@
+# 	@echo "done"
+# .PHONY: clean 
+# clean:
+# 	rm -f test8_withoutThread.o $(TARGET)
