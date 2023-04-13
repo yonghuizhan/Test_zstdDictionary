@@ -578,12 +578,11 @@ _match_stored:
     rep[0] = offset_1;
     rep[1] = offset_2;
 
-    /* Return the last literals size */
-    dict_Hit = dicthit_count;
     char* file_test = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/test_check.txt";
     FILE* fp_test = fopen(file_test,"a+");
     fprintf(fp_test,"%ld\n",dicthit_count);
     fclose(fp_test);
+    /* Return the last literals size */
     return (size_t)(iend - anchor);
 }
 
