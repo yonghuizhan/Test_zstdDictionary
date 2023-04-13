@@ -40,6 +40,8 @@ extern "C" {
 
 extern unsigned long dict_Hit;
 extern unsigned long src_Hit;
+extern unsigned long dict_ml;
+extern unsigned long src_ml;
 
 /* static assert is triggered at compile time, leaving no runtime artefact.
  * static assert only works with compile-time constants.

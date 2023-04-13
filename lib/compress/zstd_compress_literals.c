@@ -16,6 +16,8 @@
 
 unsigned long dict_Hit = 0;
 unsigned long src_Hit = 0;
+unsigned long dict_ml = 0;
+unsigned long src_ml = 0;
 
 
 /* **************************************************************

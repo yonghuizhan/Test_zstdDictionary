@@ -13,10 +13,6 @@
 #include "zstd_compress_literals.h"
 #include <stdio.h>
 
-
-// extern size_t dict_Hit;
-// extern size_t src_Hit;
-// Dict_matchHit dictMatch_hit_global = {.dict_Hit = 0, .dict_Hit = 0};
 //size_t dict_Hit = 0;
 //size_t src_Hit = 0;
 
@@ -55,7 +51,7 @@ static void ZSTD_fillDoubleHashTableForCDict(ZSTD_matchState_t* ms,
                 break;
     }   }
 }
-// dictMatch_hit_global = {.dict_Hit = 0, .dict_Hit = 0};
+
 static void ZSTD_fillDoubleHashTableForCCtx(ZSTD_matchState_t* ms,
                               void const* end, ZSTD_dictTableLoadMethod_e dtlm)
 {
@@ -354,18 +350,11 @@ size_t ZSTD_compressBlock_doubleFast_dictMatchState_generic(
     const U32 dictAndPrefixLength  = (U32)((ip - prefixLowest) + (dictEnd - dictStart));
 
     DEBUGLOG(5, "ZSTD_compressBlock_doubleFast_dictMatchState_generic");
-    // char* file_t = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/test.txt";
-    // FILE* fp_t = fopen(file_t,"a+");
-    // fprintf(fp_t,"%s\n","dictMatchState_generic");
-    // printf("dictMatchState_generic\n");
-    // fclose(fp_t);
-    
-    // dictMatch_hit_global.src_Hit = 4;
-    // dictMatch_hit_global.dict_Hit = 4;
-    // extern size_t dict_Hit;
-    // extern size_t src_Hit;
+
     dict_Hit = 0;
     src_Hit = 0;
+    src_ml = 0;
+    dict_ml = 0;
     size_t dicthit_count = 0;
     /* if a dictionary is attached, it must be within window range */
     assert(ms->window.dictLimit + (1U << cParams->windowLog) >= endIndex);
@@ -414,8 +403,14 @@ size_t ZSTD_compressBlock_doubleFast_dictMatchState_generic(
             mLength = ZSTD_count_2segments(ip+1+4, repMatch+4, iend, repMatchEnd, prefixLowest) + 4;
             ip++;
             /* Dictionary Hit count. */
-            if (repIndex < prefixLowestIndex)  dict_Hit += 1;
-            else src_Hit += 1;
+            if (repIndex < prefixLowestIndex)  {
+                dict_Hit += 1;
+                dict_ml += mLength;
+            }
+            else {
+                src_Hit += 1;
+                src_ml += mLength;
+            }
             dicthit_count ++;
             ZSTD_storeSeq(seqStore, (size_t)(ip-anchor), anchor, iend, REPCODE1_TO_OFFBASE, mLength);
             goto _match_stored;
@@ -428,8 +423,8 @@ size_t ZSTD_compressBlock_doubleFast_dictMatchState_generic(
                 offset = (U32)(ip-matchLong);
                 while (((ip>anchor) & (matchLong>prefixLowest)) && (ip[-1] == matchLong[-1])) { ip--; matchLong--; mLength++; } /* catch up */
                 /* Dictionary Hit count. */
-                // dictMatch_hit_global.src_Hit =  dictMatch_hit_global.src_Hit + 1;
                 src_Hit += 1;
+                src_ml += mLength;
                 dicthit_count ++;
                 goto _match_found;
             }
@@ -444,8 +439,8 @@ size_t ZSTD_compressBlock_doubleFast_dictMatchState_generic(
                 offset = (U32)(curr - dictMatchIndexL - dictIndexDelta);
                 while (((ip>anchor) & (dictMatchL>dictStart)) && (ip[-1] == dictMatchL[-1])) { ip--; dictMatchL--; mLength++; } /* catch up */
                 /* Dictionary Hit count. */
-                // dictMatch_hit_global.dict_Hit = dictMatch_hit_global.dict_Hit + 1;
                 dict_Hit += 1;
+                dict_ml += mLength;
                 dicthit_count ++;
                 goto _match_found;
         }   }
@@ -487,8 +482,8 @@ _search_next_long:
                     ip++;
                     offset = (U32)(ip-matchL3);
                     while (((ip>anchor) & (matchL3>prefixLowest)) && (ip[-1] == matchL3[-1])) { ip--; matchL3--; mLength++; } /* catch up */
-                    // dictMatch_hit_global.src_Hit = dictMatch_hit_global.src_Hit + 1;
                     src_Hit += 1;
+                    src_ml += mLength;
                     dicthit_count ++;
                     goto _match_found;
                 }
@@ -502,8 +497,8 @@ _search_next_long:
                     ip++;
                     offset = (U32)(curr + 1 - dictMatchIndexL3 - dictIndexDelta);
                     while (((ip>anchor) & (dictMatchL3>dictStart)) && (ip[-1] == dictMatchL3[-1])) { ip--; dictMatchL3--; mLength++; } /* catch up */
-                    // dictMatch_hit_global.dict_Hit = dictMatch_hit_global.dict_Hit + 1;
                     dict_Hit += 1;
+                    dict_ml += mLength;
                     dicthit_count ++;
                     goto _match_found;
         }   }   }
@@ -513,15 +508,15 @@ _search_next_long:
             mLength = ZSTD_count_2segments(ip+4, match+4, iend, dictEnd, prefixLowest) + 4;
             offset = (U32)(curr - matchIndexS);
             while (((ip>anchor) & (match>dictStart)) && (ip[-1] == match[-1])) { ip--; match--; mLength++; } /* catch up */
-            // dictMatch_hit_global.dict_Hit = dictMatch_hit_global.dict_Hit + 1;
             dict_Hit += 1;
+            dict_ml += mLength;
             dicthit_count ++;
         } else {
             mLength = ZSTD_count(ip+4, match+4, iend) + 4;
             offset = (U32)(ip - match);
             while (((ip>anchor) & (match>prefixLowest)) && (ip[-1] == match[-1])) { ip--; match--; mLength++; } /* catch up */
-            // dictMatch_hit_global.src_Hit = dictMatch_hit_global.src_Hit + 1;
             src_Hit += 1;
+            src_ml += mLength;
             dicthit_count ++;
         }
 
@@ -559,10 +554,14 @@ _match_stored:
                     size_t const repLength2 = ZSTD_count_2segments(ip+4, repMatch2+4, iend, repEnd2, prefixLowest) + 4;
                     U32 tmpOffset = offset_2; offset_2 = offset_1; offset_1 = tmpOffset;   /* swap offset_2 <=> offset_1 */
                     /* Dictionary Hit count. */
-                    // if (repIndex2 < prefixLowestIndex){dictMatch_hit_global.dict_Hit = dictMatch_hit_global.dict_Hit + 1;}
-                    // else {dictMatch_hit_global.src_Hit = dictMatch_hit_global.src_Hit + 1;}
-                    if (repIndex2 < prefixLowestIndex)  dict_Hit += 1;
-                    else src_Hit += 1;
+                    if (repIndex2 < prefixLowestIndex) {
+                        dict_Hit += 1;
+                        dict_ml += repLength2;
+                    }
+                    else {
+                        src_Hit += 1;
+                        src_ml += repLength2;
+                    }
                     ZSTD_storeSeq(seqStore, 0, anchor, iend, REPCODE1_TO_OFFBASE, repLength2);
                     hashSmall[ZSTD_hashPtr(ip, hBitsS, mls)] = current2;
                     hashLong[ZSTD_hashPtr(ip, hBitsL, 8)] = current2;

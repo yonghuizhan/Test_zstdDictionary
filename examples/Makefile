@@ -112,13 +112,13 @@
 #../programs/obj/conf_aec26574c336b900571a5deec4052692/zstd_double_fast.o 
 # ../programs/obj/conf_aec26574c336b900571a5deec4052692/zstd_double_fast.o 
 CC = gcc
-TARGET = test8_withoutThread
-SRC = test8_withoutThread.c
+TARGET = Test8_withoutThread
+SRC = Test8_withoutThread.c
 OBJ =  ../programs/obj/conf_aec26574c336b900571a5deec4052692/util.o \
 ../programs/obj/conf_aec26574c336b900571a5deec4052692/dibio.o \
 ../programs/obj/conf_aec26574c336b900571a5deec4052692/timefn.o \
 ../programs/obj/conf_aec26574c336b900571a5deec4052692/error_private.o \
-test8_withoutThread.o
+Test8_withoutThread.o
 # ../programs/obj/conf_aec26574c336b900571a5deec4052692/zstdmt_compress.o \
 
 
@@ -129,9 +129,9 @@ CFLAGS = -c -g -O0 -Wall
 $(TARGET): $(OBJ)
 #$(CC) -Wall -Wl,-rpath,/home/yonghui/dictSize/test_mydictComp/BackUp/Test_zstdDictionary/lib  -o $@ $^ $(LDFLAGS)
 	$(CC)  -o $@ $^ $(LDFLAGS)
-test8_withoutThread.o:test8_withoutThread.c
+Test8_withoutThread.o:Test8_withoutThread.c
 	$(CC) $(CFLAGS) $< -o $@
 	@echo "done"
 .PHONY: clean 
 clean:
-	rm -f test8_withoutThread.o $(TARGET)
+	rm -f Test8_withoutThread.o $(TARGET)
