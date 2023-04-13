@@ -18,6 +18,7 @@
 
 #include "../lib/zstd.h"
 #include "../lib/common.h"
+#include "../lib/common/debug.h"
 #include "../lib/zstd_errors.h"
 #include "../lib/zdict.h"
 #include "../programs/util.h"
@@ -33,7 +34,7 @@
 #define SAMPLESIZE_MAX (128 KB)
 #define MIN(a,b)    ((a) < (b) ? (a) : (b))
 #define DiB_rotl32_1(x,r) ((x << r) | (x >> (32 - r)))
-#define DISPLAYLEVEL 0
+#define DISPLAYLEVEL 2
 #define CLEVEL  3
 static const unsigned kDefaultRegression = 1;
 
@@ -62,12 +63,22 @@ typedef struct pthread_train_compress
     //                                 0: Use the old dictionary.*/
     size_t trainConsumed;
     size_t exitThread;
+    /* Match Hit. */
     size_t dictHit_singelChunk;     /* Singel Chunk dictionary match hit. */
     size_t srcHit_singelChunk;      /* Singel Chunk source match hit. */
     size_t dictHit_total;           /* Total dictionary match hit. */
     size_t srcHit_total;            /* Total source match hit. */
+    size_t check_blockNumb_train;
+    size_t check_blockNumb_comp;
     double hitRatio_singelChunk;    
     double hitRatio_total;
+    /* Match Length. */
+    double mLengthRatio_singelChunk;    
+    double mLengthRatio_total;
+    size_t dictmLength_singelChunk;     /* Singel Chunk dictionary  mLength. */
+    size_t srcmLength_singelChunk;      /* Singel Chunk source mLength. */
+    size_t dictmLength_total;           /* Total dictionary mLength. */
+    size_t srcmLength_total;            /* Total source  mLength. */
     double ratio ;              /* Compress Ratio. */
 }TC_params;
 TC_params tc_params;    /* Galobal paramter for Train and Compress. */
@@ -125,12 +136,23 @@ static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,si
     tc_p->srcBuffer = calloc(srcSize,sizeof(char));
     tc_p->exitThread = 0;
     tc_p->ratio = 0.0;
-    tc_p->dictHit_singelChunk = 1;
-    tc_p->srcHit_singelChunk = 1;
+    /* Match Hit. */
+    tc_p->dictHit_singelChunk = 0;
+    tc_p->srcHit_singelChunk = 0;
     tc_p->hitRatio_singelChunk = 0.0;
-    tc_p->dictHit_total = 1;
-    tc_p->srcHit_total = 1;
+    tc_p->dictHit_total = 0;
+    tc_p->srcHit_total = 0;
     tc_p->hitRatio_total = 0.0;
+    /* Match Length. */
+    tc_p->dictmLength_singelChunk = 0;
+    tc_p->srcmLength_singelChunk = 0;
+    tc_p->mLengthRatio_singelChunk = 0.0;
+    tc_p->dictmLength_total = 0;
+    tc_p->srcmLength_total = 0;
+    tc_p->mLengthRatio_total  = 0.0;
+
+    tc_p->check_blockNumb_train = 0;
+    tc_p->check_blockNumb_comp = 0;
     if (memmove(tc_p->srcBuffer,srcBuffer,srcSize) == NULL )    {printf("Initalize srcBuffer Fail!\n");}
     return check;
 }
@@ -444,10 +466,10 @@ static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* OutBuff
     ZSTD_inBuffer inBuff = { srcBuff, srcSize, 0 };
     ZSTD_outBuffer outBuff= { outBuffer, outSize, 0 };
     ZSTD_compressStream2(cctx, &outBuff, &inBuff, ZSTD_e_end);
-    // tc_params.dictHit_singelChunk += dictMatch_hit_global.dict_Hit;
-    // tc_params.srcHit_singelChunk += dictMatch_hit_global.src_Hit;
-    // tc_params.dictHit_singelChunk += dict_
-    // tc_params.srcHit_singelChunk += src_Hit;
+    tc_params.dictHit_singelChunk += dict_Hit;
+    tc_params.srcHit_singelChunk += src_Hit;
+    tc_params.dictmLength_singelChunk += dict_ml;
+    tc_params.srcmLength_singelChunk += src_ml;
     outSize = outBuff.pos;
     // ZSTD_freeCCtx(cctx);
     return outSize;
@@ -540,14 +562,26 @@ static size_t DC_Stream(TC_params *tc_parameters){
             free(oBuffer);
         }
         ZSTD_freeCCtx(cctx);
+        tc_parameters->check_blockNumb_comp += nb;
+        /* Match Hit. */
         tc_parameters->hitRatio_singelChunk = (tc_parameters->dictHit_singelChunk*1.0/tc_parameters->srcHit_singelChunk);
         tc_parameters->dictHit_total += tc_parameters->dictHit_singelChunk;
         tc_parameters->srcHit_total += tc_parameters->srcHit_singelChunk;
+
+        /* Match Length. */
+        tc_parameters->mLengthRatio_singelChunk = (tc_parameters->dictmLength_singelChunk*1.0/tc_parameters->srcmLength_singelChunk);
+        tc_parameters->dictmLength_total += tc_parameters->dictmLength_singelChunk;
+        tc_parameters->srcmLength_total += tc_parameters->srcmLength_singelChunk;
         printf("DictCompress Loop: This time Hit Ratio = %f\n",tc_parameters->hitRatio_singelChunk);
         printf("DictCompress Loop: This time Dict Hit = %ld \t Src Hit = %ld\n",tc_parameters->dictHit_singelChunk,tc_parameters->srcHit_singelChunk);
+        printf("DictCompress Loop: This time ML Ratio = %f\n",tc_parameters->mLengthRatio_singelChunk);
+        printf("DictCompress Loop: This time Dict ML = %ld \t Src ML = %ld\n",tc_parameters->dictmLength_singelChunk,tc_parameters->srcmLength_singelChunk);
         /* Reset singelChunk hit. */
-        tc_parameters->dictHit_singelChunk = 1; 
-        tc_parameters->srcHit_singelChunk = 1;
+        tc_parameters->dictHit_singelChunk = 0; 
+        tc_parameters->srcHit_singelChunk = 0;
+        tc_parameters->dictmLength_singelChunk = 0; 
+        tc_parameters->srcmLength_singelChunk= 0;
+
         result = dictCompressSize;
         tc_parameters->totalConsumedSize += cSize;
         printf("DictCompress Loop: This time consumed data size = %ld\n",cSize);
@@ -710,8 +744,8 @@ int main(int argc,char* argv[]) {
     size_t srcSize;
     
     void*  srcBuffer = loadFiletoBuff(file_in,&srcSize);
-    size_t compressChunkSize = 5 MB;
-    size_t trainChunkSize = 1 MB;
+    size_t compressChunkSize = 10 MB;
+    size_t trainChunkSize = 2 MB;
     
     if (srcSize < trainChunkSize)
     {
@@ -734,11 +768,17 @@ int main(int argc,char* argv[]) {
     pthread_join(th_train,NULL);
     pthread_join(th_dictcomp,NULL);
     
-    FILE* fp_Ratio = fopen(saveCompressRatio,"a+");
-    if ( fp_Ratio != NULL ){
-        fprintf(fp_Ratio,"%f\n",tc_params.ratio);
-    }
-    fclose(fp_Ratio);
+    // FILE* fp_Ratio = fopen(saveCompressRatio,"a+");
+    // if ( fp_Ratio != NULL ){
+    //     fprintf(fp_Ratio,"%f\n",tc_params.ratio);
+    // }
+    // fclose(fp_Ratio);
+    double hitratio = (tc_params.dictHit_total*1.0/tc_params.srcHit_total);
+    double mLratio = (tc_params.dictmLength_total*1.0/tc_params.srcmLength_total);
+    printf("Total:\tHit Ratio: %f\n",hitratio);
+    printf("Total:\tDict Hit = %ld \tSrc Hit = %ld\n",tc_params.dictHit_total,tc_params.srcHit_total);
+    printf("Total:\tML Ratio: %f\n",mLratio);
+    printf("Total:\tDict ML = %ld \tSrc ML = %ld\n",tc_params.dictmLength_total,tc_params.srcmLength_total);
     TC_params_free(&tc_params);
     free(srcBuffer);
 
