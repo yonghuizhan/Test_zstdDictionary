@@ -122,8 +122,8 @@ static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,si
     if (pthread_cond_init(&tc_p->dictComp,NULL) != 0)   {printf("pthread_cond_init Fail!!!\n");check +=1;}
     tc_p->srcSize = srcSize;
     tc_p->blockSize = blockSize;
-    tc_p->dictSize = 0;
-    tc_p->dictBuffer_old = 0;
+    tc_p->dictSize = MAX_DICTSIZE;
+    tc_p->dictSize_old = MAX_DICTSIZE;
     tc_p->tempcSize = compressChunkSize;    /* Compress chunksize. */
     tc_p->temptSize = trainChunkSize;       /* Train chunksize. */
     tc_p->MaxDictSize = MaxDictSize;        /* Max Dictionary size. */
@@ -133,7 +133,8 @@ static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,si
     // tc_p->trainNewDict = 0;
     tc_p->dictBuffer = calloc(MaxDictSize,sizeof(char));
     tc_p->dictBuffer_old = calloc(MaxDictSize,sizeof(char));
-    tc_p->srcBuffer = calloc(srcSize,sizeof(char));
+    memset(tc_p->dictBuffer,0xff,MAX_DICTSIZE);
+    memset(tc_p->dictBuffer_old,0xff,MAX_DICTSIZE);
     tc_p->exitThread = 0;
     tc_p->ratio = 0.0;
     /* Match Hit. */
@@ -153,6 +154,7 @@ static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,si
 
     tc_p->check_blockNumb_train = 0;
     tc_p->check_blockNumb_comp = 0;
+    tc_p->srcBuffer = calloc(srcSize,sizeof(char));
     if (memmove(tc_p->srcBuffer,srcBuffer,srcSize) == NULL )    {printf("Initalize srcBuffer Fail!\n");}
     return check;
 }
@@ -492,17 +494,15 @@ static size_t DC_Stream(TC_params *tc_parameters){
     }
     /* Compress with dictionary. */
     if ( tc_parameters->totalConsumedSize < tc_parameters->srcSize ){
-        void *dictBuffer = calloc(tc_parameters->dictSize,sizeof(char));
         size_t dictSize = 0;
-        void *cBuffer = calloc(tc_parameters->tempcSize,sizeof(char));
-        /* Copy dictionary  to dictBuffer. */
-
         dictSize = tc_parameters->dictSize_old;
-        if ( memmove(dictBuffer,tc_parameters->dictBuffer_old,tc_parameters->dictSize_old) == NULL){
+        void *dictBuffer = calloc(dictSize,sizeof(char));
+        /* Copy dictionary  to dictBuffer. */
+        if ( memmove(dictBuffer,tc_parameters->dictBuffer_old,dictSize) == NULL){
             printf("Error DictCompress: Copy dictBuffer_old Fail!\n");
             tc_parameters->exitThread = 1;
             free(dictBuffer);
-            free(cBuffer);
+            // free(cBuffer);
             pthread_cond_signal(&tc_parameters->updateDict);
             pthread_mutex_unlock(&tc_parameters->lock);
             return -1;
@@ -510,6 +510,7 @@ static size_t DC_Stream(TC_params *tc_parameters){
         /* Copy data to cBuffer waitting compressing. */
         size_t cSize = MIN((tc_parameters->srcSize - tc_parameters->totalConsumedSize),
                                 tc_parameters->tempcSize );
+        void *cBuffer = calloc(cSize,sizeof(char));
         size_t position = tc_parameters->totalConsumedSize;
         printf("DictCompress position start =%ld\n",position);
         if ( memmove(cBuffer,tc_parameters->srcBuffer+position,cSize) == NULL ){
