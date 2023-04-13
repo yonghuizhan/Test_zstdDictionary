@@ -562,6 +562,7 @@ _match_stored:
                         src_Hit += 1;
                         src_ml += repLength2;
                     }
+                    dicthit_count++;
                     ZSTD_storeSeq(seqStore, 0, anchor, iend, REPCODE1_TO_OFFBASE, repLength2);
                     hashSmall[ZSTD_hashPtr(ip, hBitsS, mls)] = current2;
                     hashLong[ZSTD_hashPtr(ip, hBitsL, 8)] = current2;
@@ -577,7 +578,7 @@ _match_stored:
     /* save reps for next block */
     rep[0] = offset_1;
     rep[1] = offset_2;
-
+    // dict_Hit = dicthit_count;
     char* file_test = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/test_check.txt";
     FILE* fp_test = fopen(file_test,"a+");
     fprintf(fp_test,"%ld\n",dicthit_count);
