@@ -32,8 +32,19 @@ size_t ZSTD_compressBlock_doubleFast_extDict(
         void const* src, size_t srcSize);
 
 
+
 #if defined (__cplusplus)
 }
 #endif
 
 #endif /* ZSTD_DOUBLE_FAST_H */
+// typedef struct Dictionary_matchHit
+// {
+//     unsigned long dict_Hit;
+//     unsigned long src_Hit;
+// }Dict_matchHit;
+// extern Dict_matchHit  dictMatch_hit_global;
+// extern size_t  dict_Hit = 0;
+// extern size_t src_Hit = 0;
+// size_t  dict_Hit;
+// size_t src_Hit;

@@ -138,7 +138,8 @@ else  # not Windows
 LIBZSTD = libzstd.$(SHARED_EXT_VER)
 .PHONY: $(LIBZSTD)  # must be run every time
 $(LIBZSTD): CPPFLAGS += $(CPPFLAGS_DYNLIB)
-$(LIBZSTD): CFLAGS   += -fPIC -fvisibility=hidden
+# $(LIBZSTD): CFLAGS   += -g -O0 -fPIC -fvisibility=hidden
+$(LIBZSTD): CFLAGS   += -g -O0 -fPIC
 $(LIBZSTD): LDFLAGS  += -shared $(LDFLAGS_DYNLIB)
 
 ifndef BUILD_DIR
@@ -231,7 +232,8 @@ include $(wildcard $(DEPFILES))
 # Special case : building library in single-thread mode _and_ without zstdmt_compress.c
 ZSTDMT_FILES = compress/zstdmt_compress.c
 ZSTD_NOMT_FILES = $(filter-out $(ZSTDMT_FILES),$(ZSTD_FILES))
-libzstd-nomt: CFLAGS += -fPIC -fvisibility=hidden
+# libzstd-nomt: CFLAGS += -fPIC -fvisibility=hidden
+libzstd-nomt: CFLAGS += -fPIC
 libzstd-nomt: LDFLAGS += -shared
 libzstd-nomt: $(ZSTD_NOMT_FILES)
 	@echo compiling single-thread dynamic library $(LIBVER)

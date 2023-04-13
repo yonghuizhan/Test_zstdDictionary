@@ -32,10 +32,14 @@
 #ifndef DEBUG_H_12987983217
 #define DEBUG_H_12987983217
 
+
+
 #if defined (__cplusplus)
 extern "C" {
 #endif
 
+extern unsigned long dict_Hit;
+extern unsigned long src_Hit;
 
 /* static assert is triggered at compile time, leaving no runtime artefact.
  * static assert only works with compile-time constants.

@@ -15,7 +15,8 @@ obj/conf_aec26574c336b900571a5deec4052692/zstd_double_fast.o: \
  ../lib/compress/../common/allocations.h \
  ../lib/compress/zstdmt_compress.h ../lib/compress/../common/zstd_deps.h \
  ../lib/compress/../zstd.h ../lib/compress/../common/bits.h \
- ../lib/compress/zstd_double_fast.h ../lib/compress/../common/mem.h
+ ../lib/compress/zstd_double_fast.h ../lib/compress/../common/mem.h \
+ ../lib/compress/zstd_compress_literals.h
 
 ../lib/compress/zstd_compress_internal.h:
 
@@ -66,3 +67,5 @@ obj/conf_aec26574c336b900571a5deec4052692/zstd_double_fast.o: \
 ../lib/compress/zstd_double_fast.h:
 
 ../lib/compress/../common/mem.h:
+
+../lib/compress/zstd_compress_literals.h:

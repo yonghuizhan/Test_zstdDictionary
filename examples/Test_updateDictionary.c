@@ -23,7 +23,7 @@
 #include "../programs/util.h"
 #include "../programs/dibio.h"          /* DiB_trainFromFiles */
 #include "../programs/timefn.h"         /* UTIL_time_t, UTIL_clockSpanMicro, UTIL_getTime */
-
+#include "../lib/common/error_private.h"
 
 #define KB *(1<<10)
 #define MB *(1<<20)
@@ -33,7 +33,7 @@
 #define SAMPLESIZE_MAX (128 KB)
 #define MIN(a,b)    ((a) < (b) ? (a) : (b))
 #define DiB_rotl32_1(x,r) ((x << r) | (x >> (32 - r)))
-#define DISPLAYLEVEL 2
+#define DISPLAYLEVEL 0
 #define CLEVEL  3
 static const unsigned kDefaultRegression = 1;
 
@@ -62,6 +62,13 @@ typedef struct pthread_train_compress
     //                                 0: Use the old dictionary.*/
     size_t trainConsumed;
     size_t exitThread;
+    size_t dictHit_singelChunk;     /* Singel Chunk dictionary match hit. */
+    size_t srcHit_singelChunk;      /* Singel Chunk source match hit. */
+    size_t dictHit_total;           /* Total dictionary match hit. */
+    size_t srcHit_total;            /* Total source match hit. */
+    double hitRatio_singelChunk;    
+    double hitRatio_total;
+    double ratio ;              /* Compress Ratio. */
 }TC_params;
 TC_params tc_params;    /* Galobal paramter for Train and Compress. */
 void TC_params_free(TC_params *tc_p);
@@ -117,6 +124,13 @@ static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,si
     tc_p->dictBuffer_old = calloc(MaxDictSize,sizeof(char));
     tc_p->srcBuffer = calloc(srcSize,sizeof(char));
     tc_p->exitThread = 0;
+    tc_p->ratio = 0.0;
+    tc_p->dictHit_singelChunk = 1;
+    tc_p->srcHit_singelChunk = 1;
+    tc_p->hitRatio_singelChunk = 0.0;
+    tc_p->dictHit_total = 1;
+    tc_p->srcHit_total = 1;
+    tc_p->hitRatio_total = 0.0;
     if (memmove(tc_p->srcBuffer,srcBuffer,srcSize) == NULL )    {printf("Initalize srcBuffer Fail!\n");}
     return check;
 }
@@ -381,6 +395,8 @@ static size_t  DictionaryTrain_Stream(TC_params *tc_parameters,ZDICT_fastCover_p
                 printf("Error Train:Copy tc_parameters->dictBuffer to tc_parameters->dictBuffer_old Fail!!!\n");
                 result = -1;
             }
+            /* If you change the copy order,it will improve the compress ratio.
+                Because the training data is closer to the compressed data. */
             tc_parameters->dictSize = dictSize;
             if ( memmove(tc_parameters->dictBuffer,dictBuffer,dictSize) == NULL ){
                 printf("Error Train:Copy dictBuffer to tc_parameters Fail!!!\n");
@@ -428,6 +444,10 @@ static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* OutBuff
     ZSTD_inBuffer inBuff = { srcBuff, srcSize, 0 };
     ZSTD_outBuffer outBuff= { outBuffer, outSize, 0 };
     ZSTD_compressStream2(cctx, &outBuff, &inBuff, ZSTD_e_end);
+    // tc_params.dictHit_singelChunk += dictMatch_hit_global.dict_Hit;
+    // tc_params.srcHit_singelChunk += dictMatch_hit_global.src_Hit;
+    // tc_params.dictHit_singelChunk += dict_
+    // tc_params.srcHit_singelChunk += src_Hit;
     outSize = outBuff.pos;
     // ZSTD_freeCCtx(cctx);
     return outSize;
@@ -520,6 +540,14 @@ static size_t DC_Stream(TC_params *tc_parameters){
             free(oBuffer);
         }
         ZSTD_freeCCtx(cctx);
+        tc_parameters->hitRatio_singelChunk = (tc_parameters->dictHit_singelChunk*1.0/tc_parameters->srcHit_singelChunk);
+        tc_parameters->dictHit_total += tc_parameters->dictHit_singelChunk;
+        tc_parameters->srcHit_total += tc_parameters->srcHit_singelChunk;
+        printf("DictCompress Loop: This time Hit Ratio = %f\n",tc_parameters->hitRatio_singelChunk);
+        printf("DictCompress Loop: This time Dict Hit = %ld \t Src Hit = %ld\n",tc_parameters->dictHit_singelChunk,tc_parameters->srcHit_singelChunk);
+        /* Reset singelChunk hit. */
+        tc_parameters->dictHit_singelChunk = 1; 
+        tc_parameters->srcHit_singelChunk = 1;
         result = dictCompressSize;
         tc_parameters->totalConsumedSize += cSize;
         printf("DictCompress Loop: This time consumed data size = %ld\n",cSize);
@@ -653,10 +681,14 @@ static void* multiple_DictionaryCompress_stream(void *tc_p)
             dictCompressSize += check;
         }
     }
-    double ration = (srcSize*1.0/dictCompressSize);
+    double ratio = (srcSize*1.0/dictCompressSize);
+    tc_parameters->ratio = ratio;
+    double hitRatio = (tc_parameters->dictHit_total*1.0/tc_parameters->srcHit_total);
+    tc_parameters->hitRatio_total = hitRatio;
     printf("Source size  = %ld\n",srcSize);
     printf("Dictionary Compress Size = %ld\n",dictCompressSize);
-    printf("Compress Ration: %f\n",ration);
+    printf("Compress Ration: %f\n",ratio);
+    printf("Dict Hit/Src Hit = %f\n",hitRatio);
     printf("Finish Compress!\nExit.\n\n");
     return 0;
     // return dictCompressSize;
@@ -672,16 +704,15 @@ void TC_params_free(TC_params *tc_p){
 int main(int argc,char* argv[]) {
     // int check = 1;
     char *file_in = argv[1];
+    char *saveCompressRatio = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/CompressRatio.txt";
     // size_t MaxDictSize = MAX_DICTSIZE;
     size_t blockSize = 4096;
     size_t srcSize;
     
     void*  srcBuffer = loadFiletoBuff(file_in,&srcSize);
-    size_t compressChunkSize = 10 MB;
-    size_t trainChunkSize = 2 MB;
-    // size_t totalConsumeSize = 0;    /* Data size has been consumed. */
-    // size_t dictCompressSize = 0;    /* Data size compressed with dictionary. */
-    // size_t regCOmpressSize = 0;
+    size_t compressChunkSize = 5 MB;
+    size_t trainChunkSize = 1 MB;
+    
     if (srcSize < trainChunkSize)
     {
         printf("Source size is too samll,at least > 2 MB");
@@ -702,10 +733,15 @@ int main(int argc,char* argv[]) {
         
     pthread_join(th_train,NULL);
     pthread_join(th_dictcomp,NULL);
-    // pthread_join(th_regcomp,NULL);
+    
+    FILE* fp_Ratio = fopen(saveCompressRatio,"a+");
+    if ( fp_Ratio != NULL ){
+        fprintf(fp_Ratio,"%f\n",tc_params.ratio);
+    }
+    fclose(fp_Ratio);
     TC_params_free(&tc_params);
     free(srcBuffer);
-    
+
     return 0;
 }
  

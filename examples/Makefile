@@ -91,38 +91,47 @@
 # 	./dictionary_decompression tmp2.zst tmp.zst README.md
 # 	$(RM) tmp* *.zst
 # 	@echo tests completed
-CC = gcc
-TARGET = Test_updateDictionary
-SRC = Test_updateDictionary.c
-OBJ = ../programs/obj/conf_aec26574c336b900571a5deec4052692/util.o \
-../programs/obj/conf_aec26574c336b900571a5deec4052692/dibio.o \
-../programs/obj/conf_aec26574c336b900571a5deec4052692/timefn.o \
-Test_updateDictionary.o
-LDFLAGS = -L../lib/ -lzstd -lpthread
-CFLAGS = -c -g  -Wall
-$(TARGET): $(OBJ)
-	$(CC) -o $@ $^ $(LDFLAGS)
-Test_updateDictionary.o:Test_updateDictionary.c 
-	$(CC) $(CFLAGS) $< -o $@
-	@echo "done"
-.PHONY: clean 
-clean:
-	rm -f Test_updateDictionary.o $(TARGET)
-
 # CC = gcc
-# TARGET = test8_withoutThread
-# SRC = test8_withoutThread.c
+# TARGET = Test_updateDictionary
+# SRC = Test_updateDictionary.c
 # OBJ = ../programs/obj/conf_aec26574c336b900571a5deec4052692/util.o \
 # ../programs/obj/conf_aec26574c336b900571a5deec4052692/dibio.o \
 # ../programs/obj/conf_aec26574c336b900571a5deec4052692/timefn.o \
-# test8_withoutThread.o
-# LDFLAGS = -L../lib/ -lzstd 
+# ../programs/obj/conf_aec26574c336b900571a5deec4052692/error_private.o \
+# Test_updateDictionary.o
+# LDFLAGS = -L../lib/ -lzstd -lpthread
 # CFLAGS = -c -g  -Wall
 # $(TARGET): $(OBJ)
 # 	$(CC) -o $@ $^ $(LDFLAGS)
-# test8_withoutThread.o:test8_withoutThread.c
+# Test_updateDictionary.o:Test_updateDictionary.c 
 # 	$(CC) $(CFLAGS) $< -o $@
 # 	@echo "done"
 # .PHONY: clean 
 # clean:
-# 	rm -f test8_withoutThread.o $(TARGET)
+# 	rm -f Test_updateDictionary.o $(TARGET)
+#../programs/obj/conf_aec26574c336b900571a5deec4052692/zstd_double_fast.o 
+# ../programs/obj/conf_aec26574c336b900571a5deec4052692/zstd_double_fast.o 
+CC = gcc
+TARGET = test8_withoutThread
+SRC = test8_withoutThread.c
+OBJ =  ../programs/obj/conf_aec26574c336b900571a5deec4052692/util.o \
+../programs/obj/conf_aec26574c336b900571a5deec4052692/dibio.o \
+../programs/obj/conf_aec26574c336b900571a5deec4052692/timefn.o \
+../programs/obj/conf_aec26574c336b900571a5deec4052692/error_private.o \
+test8_withoutThread.o
+# ../programs/obj/conf_aec26574c336b900571a5deec4052692/zstdmt_compress.o \
+
+
+LDFLAGS = -L../lib/ -lzstd 
+#LDFLAGS = -lzstd 
+# CFLAGS = -c -g -O0 -Wall -Wl,-rpath,/home/yonghui/dictSize/test_mydictComp/BackUp/Test_zstdDictionary/lib 
+CFLAGS = -c -g -O0 -Wall
+$(TARGET): $(OBJ)
+#$(CC) -Wall -Wl,-rpath,/home/yonghui/dictSize/test_mydictComp/BackUp/Test_zstdDictionary/lib  -o $@ $^ $(LDFLAGS)
+	$(CC)  -o $@ $^ $(LDFLAGS)
+test8_withoutThread.o:test8_withoutThread.c
+	$(CC) $(CFLAGS) $< -o $@
+	@echo "done"
+.PHONY: clean 
+clean:
+	rm -f test8_withoutThread.o $(TARGET)

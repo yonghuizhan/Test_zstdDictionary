@@ -27,6 +27,13 @@ extern "C" {
 #include "zstd_deps.h"       /* size_t */
 
 
+// typedef struct Dictionary_matchHit
+// {
+//     unsigned long dict_Hit;
+//     unsigned long src_Hit;
+// }Dict_matchHit;
+// extern Dict_matchHit dictMatch_hit_global;
+
 /* ****************************************
 *  Compiler-specific
 ******************************************/

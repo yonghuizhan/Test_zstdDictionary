@@ -10,7 +10,7 @@ obj/conf_e661af64385bb4c0b903c1a1faff373f/static/zstd_double_fast.o: \
  compress/../common/xxhash.h compress/../common/zstd_trace.h \
  compress/zstd_cwksp.h compress/../common/allocations.h \
  compress/../common/bits.h compress/zstd_double_fast.h \
- compress/../common/mem.h
+ compress/../common/mem.h compress/zstd_compress_literals.h
 
 compress/zstd_compress_internal.h:
 
@@ -55,3 +55,5 @@ compress/../common/bits.h:
 compress/zstd_double_fast.h:
 
 compress/../common/mem.h:
+
+compress/zstd_compress_literals.h:

@@ -1,5 +1,13 @@
 {
     "files.associations": {
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "zstd_double_fast.h": "c",
+        "zstd_compress_internal.h": "c",
+        "error_private.h": "c",
+        "stdio.h": "c",
+        "zstdmt_compress.h": "c",
+        "zstd.h": "c",
+        "common.h": "c",
+        "zstd_compress_literals.h": "c"
     }
 }

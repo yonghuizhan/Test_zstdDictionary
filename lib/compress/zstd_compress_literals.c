@@ -14,6 +14,10 @@
 #include "zstd_compress_literals.h"
 
 
+unsigned long dict_Hit = 0;
+unsigned long src_Hit = 0;
+
+
 /* **************************************************************
 *  Debug Traces
 ****************************************************************/

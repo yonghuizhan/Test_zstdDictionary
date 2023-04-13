@@ -101,7 +101,7 @@ DEBUGFLAGS= -Wall -Wextra -Wcast-qual -Wcast-align -Wshadow \
             -Wstrict-aliasing=1 -Wswitch-enum -Wdeclaration-after-statement \
             -Wstrict-prototypes -Wundef -Wpointer-arith \
             -Wvla -Wformat=2 -Winit-self -Wfloat-equal -Wwrite-strings \
-            -Wredundant-decls -Wmissing-prototypes -Wc++-compat
+            -Wredundant-decls -Wmissing-prototypes -Wc++-compat -g
 CFLAGS   += $(DEBUGFLAGS) $(MOREFLAGS)
 ASFLAGS  += $(DEBUGFLAGS) $(MOREFLAGS) $(CFLAGS)
 LDFLAGS  += $(MOREFLAGS)
