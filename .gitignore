@@ -5,5 +5,4 @@ examples/Test_updateDictionary_beta.c
 *.d
 lib/obj
 programs/obj
-lib/*.so
-programs/obj
+lib/libzstd.s*
