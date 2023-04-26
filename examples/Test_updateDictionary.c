@@ -26,6 +26,7 @@
 #include "../programs/dibio.h"          /* DiB_trainFromFiles */
 #include "../programs/timefn.h"         /* UTIL_time_t, UTIL_clockSpanMicro, UTIL_getTime */
 #include "../lib/common/error_private.h"
+// #include "../lib/compress/"
 
 #define KB *(1<<10)
 #define MB *(1<<20)
@@ -74,11 +75,11 @@ typedef struct pthread_train_compress
     size_t srcHit_total;            /* Total source match hit. */
     size_t check_blockNumb_train;
     size_t check_blockNumb_comp;
-    double hitRatio_singelChunk;    
-    double hitRatio_total;
+    // double hitRatio_singelChunk;    
+    // double hitRatio_total;
     /* Match Length. */
-    double mLengthRatio_singelChunk;    
-    double mLengthRatio_total;
+    // double mLengthRatio_singelChunk;    
+    // double mLengthRatio_total;
     size_t dictmLength_singelChunk;     /* Singel Chunk dictionary  mLength. */
     size_t srcmLength_singelChunk;      /* Singel Chunk source mLength. */
     size_t dictmLength_total;           /* Total dictionary mLength. */
@@ -87,10 +88,22 @@ typedef struct pthread_train_compress
     void* dictBuffer_first;      /* The first dictionary.  */
     size_t dictSize_first;
     double ratio ;              /* Compress Ratio. */
-    double *saveHit_ratio;
-    double *saveComp_ratio;
-    double *saveMatch_ratio;
+    // double *saveHit_ratio;      
+    double *saveComp_ratio;     /* Compress Ratio each chunk. */
+    // double *saveMatch_ratio;    /* mLength dict each singel chunk / srcLength each chunk*/
+    double *saveMS_ratio;       /* mLength each chunk / chunkSize (srcSize). */
+    double *saveDS_ratio;       /* dict mLength each chunk / chunkSize (srcSize). */
+    double *saveMD_ratio;
+    double *saveMSDiff_ratio;    /* Difference = (the second MSRatio - the first MSRatio)*/
+    double *savetrainTime_singelChunk;
+    double *savecompTime_singelChunk;
+    double MSRatio_total;       /* MS: (Match Length in src) / (src Size) */
+    double DSRatio_total;
+    double trainTime;
+    double compTime;
+    double cctime;              /* each chunk compress time. */
     int count;
+    int display;
 }TC_params;
 TC_params tc_params;    /* Galobal paramter for Train and Compress. */
 void TC_params_free(TC_params *tc_p);
@@ -118,7 +131,7 @@ static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* OutBuff
 // static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* dictBuffer,size_t dictSize,void* OutBuffer);
 /* Initalize TC_params */
 static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,size_t MaxDictSize,
-                                size_t blockSize,size_t compressChunkSize,size_t trainChunkSize,int trainDictOnce);
+                                size_t blockSize,size_t compressChunkSize,size_t trainChunkSize,int trainDictOnce,int display);
 
 /* Get size parameters. */
 static int readU32FromCharChecked_(const char* stringPtr, unsigned* value);
@@ -126,21 +139,21 @@ static int readU32FromCharChecked_(const char* stringPtr, unsigned* value);
 void help_function();
 /* Save compress ratio data. */
 int saveDataToFile(char* file,double data);
-
 int saveSingelChunk_data_ToFile(char *file,int compOrHit);
-
 void saveData( char* ftotalComp_Ratio, char* fsingelComp_Ratio, char* ftotalHit_Ratio, char* fsingelHit_Ratio, 
-                char* ftotalMatch_Ratio,char* fsingelMatch_Ratio);
+                char* ftotalMatch_Ratio,char* fsingelMatch_Ratio,char* ftotalMS_Ratio,char* fsingelMS_Ratio,
+                char* ftotalDS_Ratio,char* fsingelDS_Ratio,char* fsingelDSDiff,char *fsingelDS,
+                char* ftotalTrain_Time,char* fsingelTrain_Time,char* ftotalComp_Time,char* fsingelComp_Time);
 
 static U32 DiB_rand_(U32* src);
 static int Random_LoadTrainBuffer(size_t trainSize,size_t blockSize,size_t endPosition,size_t *samplePosition);
 
 void help_function(){
-    printf("example: ./Test_updateDictionary file -B 4096 -T 1MB -C 5MB -M 110KB\n");
+    printf("example: ./Test_updateDictionary file -B 4096 -T 1MB -C 5MB -M 110KB --trainDictOnce 0 -D 2\n");
     printf("\n");
-    printf("--trainDictOnce# \t: 1:Only use the first dictionary\t0:default.\n");
+    printf("--trainDictOnce# \t: 1 Only use the first dictionary\n\t\t\t0 default:The first chunk use a empty dictionary,the second chunk use the dictionary trained from the first chunk,and so on.\n\t\t\t3 Each chunk use a new dictioary trained from current chunk.\n");
     printf("-B# --blockSize# \t: cut file into independent blocks of size # (default: 4096bytes.)\n");
-    printf("-T# --trainChunkSize# \t: cut file into independent chunk of size when train dictionary # (default: 1 MB.)\n");
+    printf("-T# --trainChunkSize# \t: cut file into independent chunk of size when training dictionary # (default: 1 MB.)\n");
     printf("-M# --maxDictSize# \t: limit dictionary to specified size (default: 112640bytes.)\n");
     printf("-C# --compressChunkSize#: cut file into independent chunk of size when compress with dictionary # (default: 5 MB.)\n");
 }
@@ -174,12 +187,12 @@ static int readU32FromCharChecked_(const char* stringPtr, unsigned* value)
 }
 
 static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,size_t MaxDictSize,
-                                size_t blockSize,size_t compressChunkSize,size_t trainChunkSize,int trainDictOnce)
+                                size_t blockSize,size_t compressChunkSize,size_t trainChunkSize,int trainDictOnce,int display)
 {
     int check = 0;
-    // if (pthread_mutex_init(&tc_p->lock,NULL) != 0 )     {printf("pthread_mutex_init Fail!!!\n");check +=1;}
-    // if (pthread_cond_init(&tc_p->updateDict,NULL) != 0) {printf("pthread_cond_init Fail!!!\n");check +=1;}
-    // if (pthread_cond_init(&tc_p->dictComp,NULL) != 0)   {printf("pthread_cond_init Fail!!!\n");check +=1;}
+    if (pthread_mutex_init(&tc_p->lock,NULL) != 0 )     {printf("pthread_mutex_init Fail!!!\n");check +=1;}
+    if (pthread_cond_init(&tc_p->updateDict,NULL) != 0) {printf("pthread_cond_init Fail!!!\n");check +=1;}
+    if (pthread_cond_init(&tc_p->dictComp,NULL) != 0)   {printf("pthread_cond_init Fail!!!\n");check +=1;}
     tc_p->srcSize = srcSize;
     tc_p->blockSize = blockSize;
     tc_p->dictSize = MaxDictSize;
@@ -204,76 +217,87 @@ static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,si
     /* Match Hit. */
     tc_p->dictHit_singelChunk = 0;
     tc_p->srcHit_singelChunk = 0;
-    tc_p->hitRatio_singelChunk = 0.0;
+    // tc_p->hitRatio_singelChunk = 0.0;
     tc_p->dictHit_total = 0;
     tc_p->srcHit_total = 0;
-    tc_p->hitRatio_total = 0.0;
+    // tc_p->hitRatio_total = 0.0;
     /* Match Length. */
     tc_p->dictmLength_singelChunk = 0;
     tc_p->srcmLength_singelChunk = 0;
-    tc_p->mLengthRatio_singelChunk = 0.0;
+    // tc_p->mLengthRatio_singelChunk = 0.0;
     tc_p->dictmLength_total = 0;
     tc_p->srcmLength_total = 0;
-    tc_p->mLengthRatio_total  = 0.0;
+    // tc_p->mLengthRatio_total  = 0.0;
 
     tc_p->check_blockNumb_train = 0;
     tc_p->check_blockNumb_comp = 0;
-    tc_p->trainDictOnce = trainDictOnce;
     if (memmove(tc_p->srcBuffer,srcBuffer,srcSize) == NULL )    {printf("Initalize srcBuffer Fail!\n");}
     int nb = ((compressChunkSize + blockSize -1)/blockSize);
     tc_p->saveComp_ratio = (double*)calloc(nb,sizeof(double));
-    tc_p->saveHit_ratio = (double*)calloc(nb,sizeof(double));
-    tc_p->saveMatch_ratio = (double*)calloc(nb,sizeof(double));
+    // tc_p->saveHit_ratio = (double*)calloc(nb,sizeof(double));
+    // tc_p->saveMatch_ratio = (double*)calloc(nb,sizeof(double));
+    tc_p->saveMS_ratio = (double*)calloc(nb,sizeof(double));
+    tc_p->saveMSDiff_ratio = (double*)calloc(nb,sizeof(double));
+    tc_p->saveDS_ratio = (double*)calloc(nb,sizeof(double));
+    tc_p->savetrainTime_singelChunk = (double*)calloc(nb,sizeof(double));
+    tc_p->savecompTime_singelChunk = (double*)calloc(nb,sizeof(double));
+
+    tc_p->compTime = 0.0;
+    tc_p->trainTime = 0.0;
+    tc_p->DSRatio_total = 0.0;
+    tc_p->MSRatio_total = 0.0;
     tc_p->count = 0;
+    tc_p->display = display;
+    tc_p->cctime = 0.0;
     return check;
 }
 
-static int SvaeFile(char* FileName,size_t Size,void* srcBuff){
-    const char* f = FileName;
-    size_t size = Size;
-    void* buff = srcBuff;
-    int check = 0;
-    FILE* fp = fopen(f,"wb");
-    if (fp != NULL){
-        fwrite(buff,size,1,fp);
-    }
-    else{
-        check = 1;
-    }
-    fclose(fp);
-    return check;
+// static int SvaeFile(char* FileName,size_t Size,void* srcBuff){
+//     const char* f = FileName;
+//     size_t size = Size;
+//     void* buff = srcBuff;
+//     int check = 0;
+//     FILE* fp = fopen(f,"wb");
+//     if (fp != NULL){
+//         fwrite(buff,size,1,fp);
+//     }
+//     else{
+//         check = 1;
+//     }
+//     fclose(fp);
+//     return check;
 
-}
+// }
 /* Regular Compression */
-static void compress_orDie(const char* fname, const char* oname)
-{
-    size_t fSize;
-    void* const fBuff = mallocAndLoadFile_orDie(fname, &fSize);
-    size_t const cBuffSize = ZSTD_compressBound(fSize);
-    void* const cBuff = malloc_orDie(cBuffSize);
+// static void compress_orDie(const char* fname, const char* oname)
+// {
+//     size_t fSize;
+//     void* const fBuff = mallocAndLoadFile_orDie(fname, &fSize);
+//     size_t const cBuffSize = ZSTD_compressBound(fSize);
+//     void* const cBuff = malloc_orDie(cBuffSize);
 
-    size_t const cSize = ZSTD_compress(cBuff, cBuffSize, fBuff, fSize, 1);
-    CHECK_ZSTD(cSize);
+//     size_t const cSize = ZSTD_compress(cBuff, cBuffSize, fBuff, fSize, 1);
+//     CHECK_ZSTD(cSize);
 
-    saveFile_orDie(oname, cBuff, cSize);
+//     saveFile_orDie(oname, cBuff, cSize);
 
-    /* success */
-    printf("%25s : %6u -> %7u - %s \n", fname, (unsigned)fSize, (unsigned)cSize, oname);
+//     /* success */
+//     printf("%25s : %6u -> %7u - %s \n", fname, (unsigned)fSize, (unsigned)cSize, oname);
 
-    free(fBuff);
-    free(cBuff);
-}
+//     free(fBuff);
+//     free(cBuff);
+// }
 /* Create a ouputFile like "xxx.zst" */
-static char* createOutFilename_orDie(const char* filename)
-{
-    size_t const inL = strlen(filename);
-    size_t const outL = inL + 5;
-    void* const outSpace = malloc_orDie(outL);
-    memset(outSpace, 0, outL);
-    strcat(outSpace, filename);
-    strcat(outSpace, ".zst");
-    return (char*)outSpace;
-}
+// static char* createOutFilename_orDie(const char* filename)
+// {
+//     size_t const inL = strlen(filename);
+//     size_t const outL = inL + 5;
+//     void* const outSpace = malloc_orDie(outL);
+//     memset(outSpace, 0, outL);
+//     strcat(outSpace, filename);
+//     strcat(outSpace, ".zst");
+//     return (char*)outSpace;
+// }
 
 /* Parameters for train dictionary. */
 static ZDICT_fastCover_params_t defaultFastCoverParams(void)
@@ -297,16 +321,16 @@ static ZDICT_fastCover_params_t defaultFastCoverParams(void)
 }
 
  /* Create contex for dictcompress or dictdecompress. */
-static ZSTD_DDict* createDict_orDie(const char* dictFileName)
-{
-    size_t dictSize;
-    printf("loading dictionary %s \n", dictFileName);
-    void* const dictBuffer = mallocAndLoadFile_orDie(dictFileName, &dictSize);
-    ZSTD_DDict* const ddict = ZSTD_createDDict(dictBuffer, dictSize);
-    CHECK(ddict != NULL, "ZSTD_createDDict() failed!");
-    free(dictBuffer);
-    return ddict;
-}
+// static ZSTD_DDict* createDict_orDie(const char* dictFileName)
+// {
+//     size_t dictSize;
+//     printf("loading dictionary %s \n", dictFileName);
+//     void* const dictBuffer = mallocAndLoadFile_orDie(dictFileName, &dictSize);
+//     ZSTD_DDict* const ddict = ZSTD_createDDict(dictBuffer, dictSize);
+//     CHECK(ddict != NULL, "ZSTD_createDDict() failed!");
+//     free(dictBuffer);
+//     return ddict;
+// }
 
 /* Load file into buff. */
 static void* loadFiletoBuff(const char * FileName,size_t *FileSize){
@@ -408,7 +432,9 @@ static int Random_LoadTrainBuffer(size_t trainSize,size_t blockSize,size_t endPo
             return -1;
         }
     }
-    printf("Train Loop: Random Load into TrainBuffer.\n");
+    if (tc_params.display == 1){
+        printf("Train Loop: Random Load into TrainBuffer.\n");
+    }
     return 0;
 }
 /* Get a Dictionary by training the sample data stream.*/
@@ -423,17 +449,24 @@ static size_t  DictionaryTrain_Stream(TC_params *tc_parameters,ZDICT_fastCover_p
             pthread_mutex_unlock(&tc_parameters->lock);
             return -1;
         }
-        printf("Waitting dictionary has been consumed.\n");
+        if (tc_parameters->display == 1){
+            printf("Waitting dictionary has been consumed.\n");
+        }
         pthread_cond_wait(&tc_parameters->updateDict,&tc_parameters->lock);
-        printf("\nBack to train!!!\n");
+        if (tc_parameters->display == 1){
+           printf("\nBack to train!!!\n");
+        }
+        
         if (tc_parameters->trainDictOnce == 2){
-            if (((tc_parameters->srcSize)-(tc_parameters->totalConsumedSize)) <= (2*tc_parameters->temptSize)){
+            if (((tc_parameters->srcSize)-(tc_parameters->totalConsumedSize)) <= (tc_parameters->temptSize)){
                 tc_parameters->trainDict_Break = -1;
                 pthread_cond_signal(&tc_parameters->dictComp);
                 pthread_mutex_unlock(&tc_parameters->lock);
                 return -1;
             }
-            printf("\nDon't train new dictionary.\n");
+            if (tc_parameters->display == 1){
+                printf("\nDon't train new dictionary.\n");
+            }
             tc_parameters->dict_Exist = 1;
             pthread_cond_signal(&tc_parameters->dictComp);
             pthread_mutex_unlock(&tc_parameters->lock);
@@ -441,13 +474,15 @@ static size_t  DictionaryTrain_Stream(TC_params *tc_parameters,ZDICT_fastCover_p
         }
     } 
     /* Check if the data is exhausted. */
-    if (((tc_parameters->srcSize)-(tc_parameters->totalConsumedSize)) <= (2*tc_parameters->temptSize)){
+    if (((tc_parameters->srcSize)-(tc_parameters->totalConsumedSize)) <= (tc_parameters->temptSize)){
         tc_parameters->trainDict_Break = -1;
         result = -1;
     }
     /* If the remaining data is enough to generate a dictionary, continue training. */
     else{
-        int check_1 =0;
+        // int check_1 =0;
+        
+        
         size_t MaxDictSize = tc_parameters->MaxDictSize;
         void*  dictBuffer = malloc(MaxDictSize);  
         size_t dictSize = 0;
@@ -457,7 +492,7 @@ static size_t  DictionaryTrain_Stream(TC_params *tc_parameters,ZDICT_fastCover_p
         
         /* Set samplesSizes .*/
         int nbSamples = (int)((trainChunkSize+blockSize-1)/blockSize);
-        if (check_1){
+        if (tc_parameters->display == 1 ){
             printf("Train dictSize = %ld\n",MaxDictSize);
             printf("Train source size = %ld\n",trainChunkSize);
             printf("Train blocksize = %ld\n",blockSize);
@@ -485,12 +520,23 @@ static size_t  DictionaryTrain_Stream(TC_params *tc_parameters,ZDICT_fastCover_p
             samplebufferPosition += sampleSizes [i];
             // position += sampleSizes[i];
         }
-        printf("Train Loop: Start training.\n");
+        if (tc_parameters->display == 1){
+            printf("Train Loop: Start training.\n");
+        }
+        clock_t start_time,end_time;
+        start_time = clock();
         dictSize = ZDICT_optimizeTrainFromBuffer_fastCover(dictBuffer, MaxDictSize,
                                                                 sampleBuffer, sampleSizes, nbSamples,
                                                                 parameters);
+
+        end_time = clock();
+        double time_singelChunk = 0.0;
+        time_singelChunk = (double)(end_time - start_time)/CLOCKS_PER_SEC;
         if ( (dictSize > 0) && (dictSize <= MAX_DICTSIZE) ){
-            printf("Train Loop: Dictionary Size = %ld.\n",dictSize);
+             if (tc_parameters->display == 1 ){
+                printf("Train Loop: Dictionary Size = %ld.\n",dictSize);
+            }
+        
             tc_parameters->dictSize_old = tc_parameters->dictSize;
             if ( memmove(tc_parameters->dictBuffer_old,tc_parameters->dictBuffer,tc_parameters->dictSize) == NULL ){
                 printf("Error Train:Copy tc_parameters->dictBuffer to tc_parameters->dictBuffer_old Fail!!!\n");
@@ -516,19 +562,29 @@ static size_t  DictionaryTrain_Stream(TC_params *tc_parameters,ZDICT_fastCover_p
                     printf("Only tran dictionary once.\n");
                 }
             }
-            }
+        }
         else{
             printf("Error Train: Train Dictionary Fail!!!\nDictionary size = %ld\n",dictSize);
             result = -1;
         }
+        
+        tc_parameters->savetrainTime_singelChunk[tc_parameters->count] = time_singelChunk;
+        tc_parameters->trainTime += time_singelChunk;
         free(dictBuffer);
-        printf("Train Loop: ConsumedSize = %ld\n",tc_parameters->totalConsumedSize);
-        printf("Train Loop Remain = %ld\n",(tc_parameters->srcSize)-(tc_parameters->totalConsumedSize));
+        free(sampleBuffer);
+        free(samplePosition);
+        free(sampleSizes);
+         if (tc_parameters->display == 1 ){
+                printf("Train Loop: ConsumedSize = %ld\n",tc_parameters->totalConsumedSize);
+                printf("Train Loop Remain = %ld\n",(tc_parameters->srcSize)-(tc_parameters->totalConsumedSize));
+            }
         tc_parameters->dict_Exist = 1;
     }
     if (tc_parameters->trainDict_Break == -1){
-        printf("Remaining data size isn't enough for training a new dictionary.\n");
-        printf("Remaining data size = %ld\n",tc_parameters->srcSize-tc_parameters->totalConsumedSize);
+        if (tc_parameters->display == 1 ){
+                printf("Remaining data size isn't enough for training a new dictionary.\n");
+                printf("Remaining data size = %ld\n",tc_parameters->srcSize-tc_parameters->totalConsumedSize);
+            }
     }
     if (result == -1){
         tc_parameters->trainDict_Break = -1;
@@ -536,7 +592,9 @@ static size_t  DictionaryTrain_Stream(TC_params *tc_parameters,ZDICT_fastCover_p
 
     pthread_cond_signal(&tc_parameters->dictComp);
     pthread_mutex_unlock(&tc_parameters->lock);
-    printf("Train trainDict_Break = %ld\n",tc_parameters->trainDict_Break);
+    if (tc_parameters->display == 1 ){
+               printf("Train trainDict_Break = %ld\n",tc_parameters->trainDict_Break);
+        }
     return result;
 }
 static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* OutBuffer,ZSTD_CCtx* cctx)
@@ -550,7 +608,13 @@ static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* OutBuff
     /*Compress srcBuff*/
     ZSTD_inBuffer inBuff = { srcBuff, srcSize, 0 };
     ZSTD_outBuffer outBuff= { outBuffer, outSize, 0 };
+    clock_t start_time,end_time;
+    start_time = clock();
     ZSTD_compressStream2(cctx, &outBuff, &inBuff, ZSTD_e_end);
+    end_time = clock();
+    double time_block = 0.0;
+    time_block = (double)(end_time - start_time)/CLOCKS_PER_SEC;
+    tc_params.cctime += time_block;
     tc_params.dictHit_singelChunk += dict_Hit;
     tc_params.srcHit_singelChunk += src_Hit;
     tc_params.dictmLength_singelChunk += dict_ml;
@@ -568,22 +632,31 @@ static size_t DC_Stream(TC_params *tc_parameters){
     while ( tc_parameters->dict_Exist == 0 )
     {   
         if ( tc_parameters->trainDict_Break == -1){
-            printf("Reuse the old dictionary!!!\n(If reamining data szie >0 ).\n");
+            if (tc_parameters->display == 1){
+                printf("Reuse the old dictionary!!!\n(If reamining data szie >0 ).\n");
+            }
+            
             break;
         }
-        printf("Dictionary hasn't finished.\n");
+        if (tc_parameters->display == 1){
+            printf("Dictionary hasn't finished.\n");
+        }
         pthread_cond_wait(&tc_parameters->dictComp,&tc_parameters->lock);
-        printf("\nBack to Compress!!!\n");
+        if (tc_parameters->display == 1){
+           printf("\nBack to Compress!!!\n");
+        }
     }
     /* Compress with dictionary. */
     if ( tc_parameters->totalConsumedSize < tc_parameters->srcSize ){
         size_t dictSize = 0;
         void *dictBuffer;
+        
         /* Copy dictionary  to dictBuffer. */
         // if ( tc_parameters->trainNewDict == 1 ){
-        if (tc_parameters->trainDictOnce == 2 ){
+        if ( tc_parameters->trainDictOnce == 2 ){
             dictSize = tc_parameters->dictSize_first;
             dictBuffer = calloc(dictSize,sizeof(char));
+            // printf("\ntrainDIctOnce = %d\n",tc_parameters->trainDictOnce);
             if ( memmove(dictBuffer,tc_parameters->dictBuffer_first,dictSize) == NULL ){
                 printf("Error DictCompress: Copy dictBuffer Fail!\n");
                 tc_parameters->exitThread = 1;
@@ -592,26 +665,48 @@ static size_t DC_Stream(TC_params *tc_parameters){
                 pthread_mutex_unlock(&tc_parameters->lock);          
                 return -1;
             }
-            printf("Use the first dictionary\n\n");
+            if (tc_parameters->display == 1){
+                printf("Use the first dictionary\n\n");
+            }
+                    
         }
         else {
-            dictSize = tc_parameters->dictSize_old;
-            dictBuffer = calloc(dictSize,sizeof(char));
-            if ( memmove(dictBuffer,tc_parameters->dictBuffer_old,dictSize) == NULL ){
-                printf("Error DictCompress: Copy dictBuffer Fail!\n");
-                tc_parameters->exitThread = 1;
-                free(dictBuffer);  
-                pthread_cond_signal(&tc_parameters->updateDict);
-                pthread_mutex_unlock(&tc_parameters->lock);          
-                return -1;
+            if (tc_parameters->trainDictOnce == 3){
+                dictSize = tc_parameters->dictSize;
+                dictBuffer = calloc(dictSize,sizeof(char));
+                if ( memmove(dictBuffer,tc_parameters->dictBuffer,dictSize) == NULL ){
+                    printf("Error DictCompress: Copy dictBuffer Fail!\n");
+                    tc_parameters->exitThread = 1;
+                    free(dictBuffer);  
+                    pthread_cond_signal(&tc_parameters->updateDict);
+                    pthread_mutex_unlock(&tc_parameters->lock);          
+                    return -1;
+                }
             }
+            else {
+                dictSize = tc_parameters->dictSize_old;
+                dictBuffer = calloc(dictSize,sizeof(char));
+                if ( memmove(dictBuffer,tc_parameters->dictBuffer_old,dictSize) == NULL ){
+                    printf("Error DictCompress: Copy dictBuffer Fail!\n");
+                    tc_parameters->exitThread = 1;
+                    free(dictBuffer);  
+                    pthread_cond_signal(&tc_parameters->updateDict);
+                    pthread_mutex_unlock(&tc_parameters->lock);          
+                    return -1;
+            }
+            }
+            
         }
         /* Copy data to cBuffer waitting compressing. */
         size_t cSize = MIN((tc_parameters->srcSize - tc_parameters->totalConsumedSize),
                                 tc_parameters->tempcSize );
         void *cBuffer = calloc(cSize,sizeof(char));
         size_t position = tc_parameters->totalConsumedSize;
-        printf("DictCompress position start =%ld\n",position);
+
+        if (tc_parameters->display == 1){
+                printf("DictCompress position start =%ld\n",position);
+        }
+        
         if ( memmove(cBuffer,tc_parameters->srcBuffer+position,cSize) == NULL ){
             printf("Error DictCompress: Copy data to cBuffer Fail!\n");
             tc_parameters->exitThread = 1;
@@ -639,6 +734,7 @@ static size_t DC_Stream(TC_params *tc_parameters){
         size_t dictCompressSize = 0;
         ZSTD_CCtx* cctx = ZSTD_createCCtx();
         loadDictToCCtx(cctx,dictBuffer,dictSize);
+        // double time_singelChunk = 0.0;
         /* Dictionary Compress each chunk. */
         for (int i = 0;i < nb;i++){
             if ((tempConsumeSize >= cSize) || (tempConsumeSize < 0)){
@@ -655,31 +751,51 @@ static size_t DC_Stream(TC_params *tc_parameters){
             memcpy(tempCbuffer,cBuffer+tempConsumeSize,SamplesSize[i]);
             
             void *oBuffer = malloc(blocksize);
+            // clock_t start_time,end_time;
+            // start_time = clock();
+            // cctx->streamStage = zcss_load;
             dictCompressSize += DictionaryComp_Stream(tempCbuffer,SamplesSize[i],oBuffer,cctx);
+            // end_time = clock();
+            // time_singelChunk += (double)(end_time - start_time )/CLOCKS_PER_SEC;
             // dictCompressSize += DictionaryComp_Stream(tempCbuffer,SamplesSize[i],dictBuffer,dictSize,oBuffer);
             tempConsumeSize +=SamplesSize[i];
             free(tempCbuffer);
             free(oBuffer);
         }
+        tc_parameters->savecompTime_singelChunk[tc_parameters->count] = tc_parameters->cctime;
+        tc_parameters->compTime += tc_parameters->cctime;
+        tc_parameters->cctime = 0.0;
         ZSTD_freeCCtx(cctx);
         tc_parameters->check_blockNumb_comp += nb;
         result = dictCompressSize;
         tc_parameters->totalConsumedSize += cSize;
         /* Match Hit. */
-        tc_parameters->hitRatio_singelChunk = (tc_parameters->dictHit_singelChunk*1.0/tc_parameters->srcHit_singelChunk);
+        // tc_parameters->hitRatio_singelChunk = (tc_parameters->dictHit_singelChunk*1.0/tc_parameters->srcHit_singelChunk);
         tc_parameters->dictHit_total += tc_parameters->dictHit_singelChunk;
         tc_parameters->srcHit_total += tc_parameters->srcHit_singelChunk;
 
         /* Match Length. */
-        tc_parameters->mLengthRatio_singelChunk = (tc_parameters->dictmLength_singelChunk*1.0/tc_parameters->srcmLength_singelChunk);
+        // tc_parameters->mLengthRatio_singelChunk = (tc_parameters->dictmLength_singelChunk*1.0/tc_parameters->srcmLength_singelChunk);
         tc_parameters->dictmLength_total += tc_parameters->dictmLength_singelChunk;
         tc_parameters->srcmLength_total += tc_parameters->srcmLength_singelChunk;
-        tc_parameters->saveHit_ratio[tc_parameters->count] = tc_parameters->hitRatio_singelChunk;
-        tc_parameters->saveMatch_ratio[tc_parameters->count] = tc_parameters->mLengthRatio_singelChunk;
-        printf("DictCompress Loop: This time Hit Ratio = %f\n",tc_parameters->hitRatio_singelChunk);
-        printf("DictCompress Loop: This time Dict Hit = %ld \t Src Hit = %ld\n",tc_parameters->dictHit_singelChunk,tc_parameters->srcHit_singelChunk);
-        printf("DictCompress Loop: This time ML Ratio = %f\n",tc_parameters->mLengthRatio_singelChunk);
-        printf("DictCompress Loop: This time Dict ML = %ld \t Src ML = %ld\n",tc_parameters->dictmLength_singelChunk,tc_parameters->srcmLength_singelChunk);
+        // tc_parameters->saveHit_ratio[tc_parameters->count] = tc_parameters->hitRatio_singelChunk;
+        // tc_parameters->saveMatch_ratio[tc_parameters->count] = tc_parameters->mLengthRatio_singelChunk;
+        tc_parameters->saveMS_ratio[tc_parameters->count] = (tc_parameters->srcmLength_singelChunk*1.0/cSize);
+        // double DSRatio = (1 MB)*((1.0/tc_parameters->srcmLength_singelChunk)-(1.0/tc_parameters->dictmLength_singelChunk));
+        // tc_parameters->saveDS_ratio[tc_parameters->count] = DSRatio;
+        tc_parameters->saveDS_ratio[tc_parameters->count] = (tc_parameters->dictmLength_singelChunk*1.0/cSize);
+        if (tc_parameters->count >= 1){
+            int n = tc_parameters->count;
+            tc_parameters->saveMSDiff_ratio[n] = tc_parameters->saveMS_ratio[n] - tc_parameters->saveMS_ratio[n-1];
+        }
+        if (tc_parameters->display == 1){
+            printf("DictCompress Loop: This time DS Ratio = %f\n",tc_parameters->saveDS_ratio[tc_parameters->count]);
+            printf("DictCompress Loop: This time MS Ratio = %f\n",tc_parameters->saveMS_ratio[tc_parameters->count]);
+            // printf("DictCompress Loop: This time Hit Ratio = %f\n",tc_parameters->hitRatio_singelChunk);
+            printf("DictCompress Loop: This time Dict Hit = %ld \t Src Hit = %ld\n",tc_parameters->dictHit_singelChunk,tc_parameters->srcHit_singelChunk);
+            // printf("DictCompress Loop: This time ML Ratio = %f\n",tc_parameters->mLengthRatio_singelChunk);
+            printf("DictCompress Loop: This time Dict ML = %ld \t Src ML = %ld\n",tc_parameters->dictmLength_singelChunk,tc_parameters->srcmLength_singelChunk);
+        }
         /* Reset singelChunk hit. */
         tc_parameters->dictHit_singelChunk = 0; 
         tc_parameters->srcHit_singelChunk = 0;
@@ -688,24 +804,29 @@ static size_t DC_Stream(TC_params *tc_parameters){
         double tempCompRatio = (cSize*1.0/dictCompressSize);
         tc_parameters->saveComp_ratio[tc_parameters->count] = tempCompRatio;
         tc_parameters->count += 1;
-        printf("DictCompress Loop: This time consumed data size = %ld\n",cSize);
-        printf("DictCompress Loop: Compressed size = %ld\n",dictCompressSize);
-        printf("DictCompress Loop: Compressed Ratio = %f\n",tempCompRatio);
-        printf("DictCompress Loop: Total ConsumedSize = %ld\n",tc_parameters->totalConsumedSize);
+        if (tc_parameters->display == 1){
+            printf("DictCompress Loop: This time consumed data size = %ld\n",cSize);
+            printf("DictCompress Loop: Compressed size = %ld\n",dictCompressSize);
+            printf("DictCompress Loop: Compressed Ratio = %f\n",tempCompRatio);
+            printf("DictCompress Loop: Total ConsumedSize = %ld\n",tc_parameters->totalConsumedSize);
+        }
         tc_parameters->dict_Exist = 0;
-       
         free(SamplesSize);
         free(dictBuffer);
         free(cBuffer);
     }
     else{
-        printf("Dictionary Compress Finish.\n");
+        if (tc_parameters->display == 1){
+            printf("Dictionary Compress Finish.\n");
+        }
         result = -1;
     }
     pthread_cond_signal(&tc_parameters->updateDict);
     pthread_mutex_unlock(&tc_parameters->lock);    
-    printf("Compress trainDict_Break = %ld\n",tc_parameters->trainDict_Break);
-    printf("Remaining data size = %ld\n",((tc_parameters->srcSize)-(tc_parameters->totalConsumedSize)));
+    if (tc_parameters->display == 1){
+            printf("Compress trainDict_Break = %ld\n",tc_parameters->trainDict_Break);
+            printf("Remaining data size = %ld\n",((tc_parameters->srcSize)-(tc_parameters->totalConsumedSize)));
+    }
     return result;
 } 
 /* Regualr Compress the srcBuffer given,and return the compressed size.
@@ -769,12 +890,11 @@ static void* multiple_DictionaryTrain_stream(void* tc_p){
     size_t trainSize = tc_paramters->temptSize;
     size_t dictSize = 0;
     
-    int check = 1;
-    if (check){
-        printf("TMSource size = %ld\n",srcSize);
-        printf("TMblockSize = %ld\n",blockSize);
-        printf("TMtrainSize = %ld\n",trainSize);
-        printf("TMtotalConsumedSize = %ld\n",totalConsumedSize);
+    if (tc_paramters->display == 1){
+        printf("Train: Source size = %ld\n",srcSize);
+        printf("Train: blockSize = %ld\n",blockSize);
+        printf("Train: trainSize = %ld\n",trainSize);
+        printf("Train: totalConsumedSize = %ld\n",totalConsumedSize);
         printf("\n");
     }
     int i = 0;
@@ -783,12 +903,17 @@ static void* multiple_DictionaryTrain_stream(void* tc_p){
     {           
         dictSize = DictionaryTrain_Stream(tc_paramters,&fastCoverParams);
         if ( dictSize > 0 ){
-            printf("Train dictionary %d times\n",i);
+            if ( tc_paramters->display == 1){
+                printf("Train dictionary %d times\n",i);
+            }  
             i++;            
         }
         if (dictSize == -1) break;
     }     
-    printf("Finish training program!\nExit.\n\n");                                    
+    if (tc_paramters->display == 1){
+        printf("Finish training program!\nExit.\n\n");  
+    }
+                                      
     return 0;
 }
 static void* multiple_DictionaryCompress_stream(void *tc_p)
@@ -800,44 +925,61 @@ static void* multiple_DictionaryCompress_stream(void *tc_p)
     // size_t trainSize = tc_parameters->temptSize;
     // size_t blocksize = tc_parameters->blockSize;
     size_t dictCompressSize = 0;
-    printf("Compress: srcSize = %ld\n",tc_parameters->srcSize);
-    printf("Compress: blockSize = %ld\n",tc_parameters->blockSize);
-    printf("Compress: totalconsumedsize = %ld\n",tc_parameters->totalConsumedSize);
+    if (tc_parameters->display <= 2){
+        printf("Compress: srcSize = %ld\n",tc_parameters->srcSize);
+        printf("Compress: blockSize = %ld\n",tc_parameters->blockSize);
+    }
     int i = 0;
     size_t check = 0;
     // size_t nbchunk = srcSize/(compchunkSize);
     while ( 1 )
     {
-        printf("\nHers is dictcompress loop.\n");
+        if (tc_parameters->display == 1 ){
+            printf("\nHers is dictcompress loop.\n");
+        }
         check = DC_Stream(tc_parameters);
         i++;
         if (check  == -1) {
             break;
         }
         else{
-            printf("Compress %d times.\n",i);
+            if (tc_parameters->display == 1){
+                printf("Compress %d times.\n",i);
+            }
             dictCompressSize += check;
         }
     }
     double ratio = (srcSize*1.0/dictCompressSize);
     tc_parameters->ratio = ratio;
-    double hitRatio = (tc_parameters->dictHit_total*1.0/tc_parameters->srcHit_total);
-    tc_parameters->hitRatio_total = hitRatio;
-    printf("Source size  = %ld\n",srcSize);
-    printf("Dictionary Compress Size = %ld\n",dictCompressSize);
-    printf("Compress Ratio: %f\n",ratio);
-    printf("Dict Hit/Src Hit = %f\n",hitRatio);
+    // double hitRatio = (tc_parameters->dictHit_total*1.0/tc_parameters->srcHit_total);
+    // tc_parameters->hitRatio_total = hitRatio;
+    if (tc_parameters->display <= 2){
+        printf("Source size  = %ld\n",srcSize);
+        printf("Dictionary Compress Size = %ld\n",dictCompressSize);
+        printf("Compress Ratio: %f\n",ratio);
+    }
     printf("Finish Compress!\nExit.\n\n");
     return 0;
-    // return dictCompressSize;
 }
 void TC_params_free(TC_params *tc_p){
-    free(tc_p->dictBuffer);
+    
     free(tc_p->srcBuffer);
+    /* free dictBuffer. */
+    free(tc_p->dictBuffer);
+    free(tc_p->dictBuffer_first);
     free(tc_p->dictBuffer_old);
+    /*free save_ratio. */
+    free(tc_p->saveComp_ratio);
+    // free(tc_p->saveHit_ratio);
+    // free(tc_p->saveMatch_ratio);
+    free(tc_p->saveMS_ratio);
+    free(tc_p->saveDS_ratio);
+    free(tc_p->savecompTime_singelChunk);
+    free(tc_p->savetrainTime_singelChunk);
     pthread_mutex_destroy(&tc_p->lock);
     pthread_cond_destroy(&tc_p->dictComp);
     pthread_cond_destroy(&tc_p->updateDict);
+
 }
 int saveDataToFile(char* file,double data){
     FILE* fp = fopen(file,"a+");
@@ -860,11 +1002,29 @@ int saveSingelChunk_data_ToFile(char *file,int compOrHit){
             if (compOrHit == 0){
                 fprintf(fp,"%f\n",tc_params.saveComp_ratio[i]);
             }
-            if (compOrHit == 1){
-                fprintf(fp,"%f\n",tc_params.saveHit_ratio[i]);
-            }
+            // if (compOrHit == 1){
+            //     // fprintf(fp,"%f\n",tc_params.saveHit_ratio[i]);
+            // }
             if (compOrHit == 2){
-                fprintf(fp,"%f\n",tc_params.saveMatch_ratio[i]);
+                // fprintf(fp,"%f\n",tc_params.saveMatch_ratio[i]);
+            }
+            if (compOrHit == 3){
+                 fprintf(fp,"%f\n",tc_params.saveMS_ratio[i]);
+            }
+            // if (compOrHit == 4){
+            //     //  fprintf(fp,"%f\n",tc_params.saveDS_ratio[i]);
+            // }
+            if (compOrHit == 5){
+                 fprintf(fp,"%f\n",tc_params.saveMSDiff_ratio[i]);
+            }
+            if (compOrHit == 6){
+                 fprintf(fp,"%f\n",tc_params.saveDS_ratio[i]);
+            }
+            if (compOrHit == 7){
+                 fprintf(fp,"%f\n",tc_params.savetrainTime_singelChunk[i]);
+            }
+            if (compOrHit == 8){
+                 fprintf(fp,"%f\n",tc_params.savecompTime_singelChunk[i]);
             }
         }
     }
@@ -878,19 +1038,50 @@ int saveSingelChunk_data_ToFile(char *file,int compOrHit){
 }
 
 
-void saveData( char* ftotalComp_Ratio, char* fsingelComp_Ratio, char* ftotalHit_Ratio, char* fsingelHit_Ratio, 
-                char* ftotalMatch_Ratio,char* fsingelMatch_Ratio)
+void saveData( char* ftotalComp_Ratio, char* fsingelComp_Ratio, char* ftotalHit_Ratio,char* fsingelHit_Ratio, 
+                char* ftotalMatch_Ratio,char* fsingelMatch_Ratio,char* ftotalMS_Ratio,char* fsingelMS_Ratio,
+                char* ftotalDS_Ratio,char* fsingelDS_Ratio,char* fsingelMSDiff,char* fsingelDS,
+                char* ftotalTrain_Time,char* fsingelTrain_Time,char* ftotalComp_Time,char* fsingelComp_Time)
 {
     int check_t = 0;
     int check_s = 0;
+    // if ( ftotalHit_Ratio != NULL ){
+    //     // check_t = saveDataToFile(ftotalHit_Ratio,tc_params.hitRatio_total);
+    // }
+
+    // if ( ftotalMatch_Ratio != NULL ){
+    //     // check_t = saveDataToFile(ftotalMatch_Ratio,tc_params.mLengthRatio_total);
+    // }
+    if ( ftotalDS_Ratio != NULL ){
+       check_t = saveDataToFile(ftotalDS_Ratio,tc_params.DSRatio_total);
+    }
+    // check_t = saveDataToFile(ftotalHit_Ratio,tc_params.hitRatio_total);
+    // check_t = saveDataToFile(ftotalMatch_Ratio,tc_params.mLengthRatio_total);
+    // check_t = saveDataToFile(ftotalDS_Ratio,tc_params.DSRatio_total);
+    check_t = saveDataToFile(ftotalMS_Ratio,tc_params.MSRatio_total);
     check_t = saveDataToFile(ftotalComp_Ratio,tc_params.ratio);
-    check_t = saveDataToFile(ftotalHit_Ratio,tc_params.hitRatio_total);
-    check_t = saveDataToFile(ftotalMatch_Ratio,tc_params.mLengthRatio_total);
-    check_s = saveSingelChunk_data_ToFile(fsingelComp_Ratio,0);
-    check_s = saveSingelChunk_data_ToFile(fsingelHit_Ratio,1);
-    check_s = saveSingelChunk_data_ToFile(fsingelMatch_Ratio,2);
+    check_t = saveDataToFile(ftotalComp_Time,tc_params.compTime);
+    check_t = saveDataToFile(ftotalTrain_Time,tc_params.trainTime);
+
     
+    // if ( fsingelHit_Ratio != NULL ){
+    //     check_s = saveSingelChunk_data_ToFile(fsingelHit_Ratio,1);
+    // }
+    // if ( fsingelMatch_Ratio != NULL ){
+    //     check_s = saveSingelChunk_data_ToFile(fsingelMatch_Ratio,2);
+    // }
+    check_s = saveSingelChunk_data_ToFile(fsingelComp_Ratio,0);
+    // check_s = saveSingelChunk_data_ToFile(fsingelHit_Ratio,1);
+    // check_s = saveSingelChunk_data_ToFile(fsingelMatch_Ratio,2);
+    check_s = saveSingelChunk_data_ToFile(fsingelMS_Ratio,3);
+    // check_s = saveSingelChunk_data_ToFile(fsingelDS_Ratio,4);
+    check_s = saveSingelChunk_data_ToFile(fsingelMSDiff,5);
+    check_s = saveSingelChunk_data_ToFile(fsingelDS,6);
+    check_s = saveSingelChunk_data_ToFile(fsingelTrain_Time,7);
+    check_s = saveSingelChunk_data_ToFile(fsingelComp_Time,8);
+
 }
+
 int main(int argc,char* argv[]) {
     // int check = 1;
      if (argc < 6) {
@@ -899,17 +1090,32 @@ int main(int argc,char* argv[]) {
         return 0;
     }
     char *file_in = argv[1];
-    char *saveCompressRatio = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/CompressRatio.txt";
-    char *saveHitRatio = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/HitRatio.txt";
-    char *saveMLength = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/MLengthRatio.txt";
-    char *saveCompressRatio_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/CompressRatio_singel.txt";
-    char *saveHitRatio_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/HitRatio_singel.txt";
-    char *saveMLength_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/MLengthRatio_singel.txt";
+    char *saveCompressRatio = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/cRatio.txt";
+    // char *saveHitRatio = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/hRatio.txt";
+    // char *saveMLength = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/mLRatio.txt";
+    char *saveMSRatio = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/MSRatio.txt";
+    char *saveDSRatio = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/DSRatio.txt";
+    char *saveTrainTime = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/TrainTime.txt";
+    char *saveCompTime = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/CompTime.txt";
+
+
+    char *saveCompressRatio_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/cRatio_singel.txt";
+    // char *saveHitRatio_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/hRatio_singel.txt";
+    // char *saveMLength_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/mLRatio_singel.txt";
+    char *saveMSRatio_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/MSRatio_singel.txt";
+    // char *saveDSRAtio_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/DSRatio_singel.txt";
+    char *saveMSDiff_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/MSDiff_singel.txt";
+    char *saveDS_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/DS_singel.txt";
+    char *saveTrainTime_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/TrainTime_singel.txt";
+    char *saveCompTime_singel = "/home/yonghui/dictSize/test_mydictComp/Test_python/TestData/CompTime_singel.txt";
+
+
     unsigned blockSize = BLOCKSIZE;
     unsigned compressChunkSize = COMPCHUNKSIZE;
     unsigned trainChunkSize = TRAINCHUNKSIZE;
     unsigned maxDictSize = MAX_DICTSIZE;
     int trainDictOnce = 0;
+    int display = 0;
     size_t srcSize;
     void*  srcBuffer = loadFiletoBuff(file_in,&srcSize);
     if (srcSize < trainChunkSize)
@@ -920,13 +1126,14 @@ int main(int argc,char* argv[]) {
     }
     int opt;
     int option_index = 0;
-    char *optstring = "B:T:C:M:";
+    char *optstring = "B:T:C:M:D:";
     static struct option long_options[] = {
         {"blockSize", required_argument, NULL, 'B'},
         {"trainChunkSize",  required_argument, NULL, 'T'},
         {"compressChunkSize", required_argument, NULL, 'C'},
         {"maxDictSize", required_argument, NULL, 'M'},
         {"trainDictOnce", required_argument, NULL, 'O'},
+        {"display", required_argument, NULL, 'D'},
         {0, 0, 0, 0}
     };
     while ( (opt = getopt_long(argc, argv, optstring, long_options, &option_index)) != -1)
@@ -943,12 +1150,16 @@ int main(int argc,char* argv[]) {
                             break;
                 case 'O':   trainDictOnce = (int)(*optarg - '0');
                             break;
+                case 'D':   display = (int)(*optarg - '0');
+                            break;
                 default:    printf("Error: Failed to parse parameter.\n");
                             break;                   
             }
     }
-    printf("trainDictOnce = %d\n",trainDictOnce);
-    if (initalize_TC_params(&tc_params,srcBuffer,srcSize,maxDictSize,blockSize,compressChunkSize,trainChunkSize,trainDictOnce) != 0){
+    if (tc_params.display <= 2){
+        printf("trainDictOnce = %d\n",trainDictOnce);
+    }
+    if (initalize_TC_params(&tc_params,srcBuffer,srcSize,maxDictSize,blockSize,compressChunkSize,trainChunkSize,trainDictOnce,display) != 0){
         printf("Initalize TC_paramters Fail!!!\n");
         free(srcBuffer);
         TC_params_free(&tc_params);
@@ -963,19 +1174,24 @@ int main(int argc,char* argv[]) {
     pthread_join(th_train,NULL);
     pthread_join(th_dictcomp,NULL);
     
-    // FILE* fp_Ratio = fopen(saveCompressRatio,"a+");
-    // if ( fp_Ratio != NULL ){
-    //     fprintf(fp_Ratio,"%f\n",tc_params.ratio);
-    // }
-    // fclose(fp_Ratio);
     double hitratio = (tc_params.dictHit_total*1.0/tc_params.srcHit_total);
     double mLratio = (tc_params.dictmLength_total*1.0/tc_params.srcmLength_total);
-    tc_params.mLengthRatio_total = mLratio;
-    printf("Total:\tHit Ratio: %f\n",hitratio);
-    printf("Total:\tDict Hit = %ld \tSrc Hit = %ld\n",tc_params.dictHit_total,tc_params.srcHit_total);
-    printf("Total:\tML Ratio: %f\n",mLratio);
-    printf("Total:\tDict ML = %ld \tSrc ML = %ld\n",tc_params.dictmLength_total,tc_params.srcmLength_total);
-    saveData(saveCompressRatio,saveCompressRatio_singel,saveHitRatio,saveHitRatio_singel,saveMLength,saveMLength_singel);
+    // tc_params.mLengthRatio_total = mLratio;
+    double MSRatio = (tc_params.srcmLength_total*1.0/tc_params.totalConsumedSize);
+    tc_params.MSRatio_total = MSRatio;
+    // double DSRatio = (1 MB)*((1.0/tc_params.srcmLength_total) - (1.0/tc_params.dictmLength_total));
+    double DSRatio = ((1.0*tc_params.dictmLength_total)/tc_params.srcSize);
+    tc_params.DSRatio_total = DSRatio;
+    if (tc_params.display <= 2){
+        printf("Total:\tDSratio: %f\n",DSRatio);
+        printf("Total:\tMSratio: %f\n",MSRatio);
+        printf("Total:\tHit Ratio: %f\n",hitratio);
+        printf("Total:\tDict Hit = %ld \tSrc Hit = %ld\n",tc_params.dictHit_total,tc_params.srcHit_total);
+        printf("Total:\tML Ratio: %f\n",mLratio);
+        printf("Total:\tDict ML = %ld \tSrc ML = %ld\n",tc_params.dictmLength_total,tc_params.srcmLength_total);
+    }
+    // saveData(saveCompressRatio,saveCompressRatio_singel,saveHitRatio,saveHitRatio_singel,saveMLength,saveMLength_singel,saveMSRatio,saveMSRatio_singel,saveDSRatio,saveDSRAtio_singel,saveMSDiff_singel,saveDS_singel);
+    saveData(saveCompressRatio,saveCompressRatio_singel,NULL,NULL,NULL,NULL,saveMSRatio,saveMSRatio_singel,saveDSRatio,NULL,saveMSDiff_singel,saveDS_singel,saveCompTime,saveCompTime_singel,saveTrainTime,saveTrainTime_singel);
     TC_params_free(&tc_params);
     free(srcBuffer);
 

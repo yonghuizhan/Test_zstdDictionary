@@ -787,6 +787,7 @@ void TC_params_free(TC_params *tc_p){
     free(tc_p->dictBuffer);
     free(tc_p->srcBuffer);
     free(tc_p->dictBuffer_old);
+    
     // pthread_mutex_destroy(&tc_p->lock);
     // pthread_cond_destroy(&tc_p->dictComp);
     // pthread_cond_destroy(&tc_p->updateDict);

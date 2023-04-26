@@ -91,6 +91,7 @@
 # 	./dictionary_decompression tmp2.zst tmp.zst README.md
 # 	$(RM) tmp* *.zst
 # 	@echo tests completed
+# ../programs/obj/conf_aec26574c336b900571a5deec4052692/zstd_compress_internal.o 
 CC = gcc
 TARGET = Test_updateDictionary
 SRC = Test_updateDictionary.c
