@@ -26,14 +26,15 @@
 #include "../programs/dibio.h"          /* DiB_trainFromFiles */
 #include "../programs/timefn.h"         /* UTIL_time_t, UTIL_clockSpanMicro, UTIL_getTime */
 #include "../lib/common/error_private.h"
+#include "../lib/compress/zstd_compress_internal.h"
 
-#define KB *(1<<10)
-#define MB *(1<<20)
+// #define KB *(1<<10)
+// #define MB *(1<<20)
 #define DICT_BUFFER_SIZE 32768
 #define MAX_DICTSIZE 112640      
 #define DEFAULT_ACCEL_TEST 1
 #define SAMPLESIZE_MAX (128 KB)
-#define MIN(a,b)    ((a) < (b) ? (a) : (b))
+// #define MIN(a,b)    ((a) < (b) ? (a) : (b))
 #define DiB_rotl32_1(x,r) ((x << r) | (x >> (32 - r)))
 #define DISPLAYLEVEL 2
 #define CLEVEL  3
@@ -88,6 +89,10 @@ typedef struct pthread_train_compress
     int trainDictOnce;             /* Only use the first dictionary. */
     void* dictBuffer_first;      /* The first dictionary.  */
     size_t dictSize_first;
+    int dictComp_API;           /* 0: Use compressStream2.
+                                    1: Use usingCDict.*/
+    int regComp;                /* 0: use dictionary compress.
+                                    1: use regular compress.*/
     double ratio ;              /* Compress Ratio. */
 }TC_params;
 TC_params tc_params;    /* Galobal paramter for Train and Compress. */
@@ -104,6 +109,8 @@ static size_t DC_Stream(TC_params *tc_parameters);
 
 /* Thread function :Regular Compress data.*/
 // static size_t RegularComp_Stream(REG_compress_params regParams);
+static size_t RegularComp_Stream(TC_params* tc_params);
+
 
 /* Thread function :Dictionary Compress data.*/
 static void* multiple_DictionaryCompress_stream(void  *tc_parameters);
@@ -115,7 +122,7 @@ static void *multiple_DictionaryTrain_stream(void *tc_parameters);
 static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* OutBuffer,ZSTD_CCtx* cctx);
 /* Initalize TC_params */
 static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,size_t MaxDictSize,
-                                size_t blockSize,size_t compressChunkSize,size_t trainChunkSize,int trainDictOnce);
+                                size_t blockSize,size_t compressChunkSize,size_t trainChunkSize,int trainDictOnce,int regular,int dictComp_API);
 /* Get size parameters. */
 static int readU32FromCharChecked_(const char* stringPtr, unsigned* value);
 /* Help function. */
@@ -151,7 +158,7 @@ static int readU32FromCharChecked_(const char* stringPtr, unsigned* value)
     return 0;
 }
 static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,size_t MaxDictSize,
-                                size_t blockSize,size_t compressChunkSize,size_t trainChunkSize,int trainDictOnce)
+                                size_t blockSize,size_t compressChunkSize,size_t trainChunkSize,int trainDictOnce,int regular,int dictComp_API)
 {
     int check = 0;
     // if (pthread_mutex_init(&tc_p->lock,NULL) != 0 )     {printf("pthread_mutex_init Fail!!!\n");check +=1;}
@@ -195,6 +202,9 @@ static int initalize_TC_params(TC_params *tc_p,void *srcBuffer,size_t srcSize,si
 
     tc_p->check_blockNumb_train = 0;
     tc_p->check_blockNumb_comp = 0;
+    tc_p->regComp = regular;
+    tc_p->dictComp_API = dictComp_API;
+    
     if (memmove(tc_p->srcBuffer,srcBuffer,srcSize) == NULL )    {printf("Initalize srcBuffer Fail!\n");}
     return check;
 }
@@ -533,6 +543,17 @@ static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* OutBuff
     // ZSTD_freeCCtx(cctx);
     return outSize;
 } 
+static size_t dictComp_stream(ZSTD_CCtx* cctx,
+                                void* dst, size_t dstCapacity,
+                                const void* src, size_t srcSize,
+                                const ZSTD_CDict* cdict)
+{   
+    const void* srcBuff = src;
+    void* const outBuff = dst;
+    size_t outSize = dstCapacity;
+    size_t const cSize = ZSTD_compress_usingCDict(cctx, outBuff, outSize,srcBuff, srcSize, cdict);
+    return cSize;
+}
 static size_t DC_Stream(TC_params *tc_parameters){
 
     int result = 0;
@@ -597,8 +618,25 @@ static size_t DC_Stream(TC_params *tc_parameters){
         size_t tempConsumeSize = 0;
         size_t dictCompressSize = 0;
         ZSTD_CCtx* cctx = ZSTD_createCCtx();
+        ZSTD_CDict* ccdict;
+        if ( tc_parameters->dictComp_API == 1 ){
+            ccdict = ZSTD_createCDict(dictBuffer, dictSize, CLEVEL);
+        }
+        ZSTD_CDict* const cdict = ccdict;
         /* Load dict into cctx localDict */
-        loadDictToCCtx(cctx,dictBuffer,dictSize);
+        if (tc_parameters->dictComp_API == 0){
+            loadDictToCCtx(cctx,dictBuffer,dictSize);
+        }      
+        if ( cctx == NULL ){
+            free (cBuffer);
+            free(SamplesSize);
+            free(dictBuffer);
+            tc_parameters->exitThread = 1;
+            printf("cctx initalized Fail!!!\n");
+            // pthread_cond_signal(&tc_parameters->updateDict);
+            // pthread_mutex_unlock(&tc_parameters->lock);
+            return -1;
+        }          
         /* Dictionary Compress each chunk. */
         for (int i = 0;i < nb;i++){
             if ((tempConsumeSize >= cSize) || (tempConsumeSize < 0)){
@@ -614,11 +652,18 @@ static size_t DC_Stream(TC_params *tc_parameters){
             memcpy(tempCbuffer,cBuffer+tempConsumeSize,SamplesSize[i]);
             
             void *oBuffer = malloc(blocksize);
-            dictCompressSize += DictionaryComp_Stream(tempCbuffer,SamplesSize[i],oBuffer,cctx);
-            
+            if ( tc_parameters->dictComp_API == 0){
+                dictCompressSize += DictionaryComp_Stream(tempCbuffer,SamplesSize[i],oBuffer,cctx);
+            }
+            if ( tc_parameters->dictComp_API == 1){
+                dictCompressSize += dictComp_stream(cctx,oBuffer,blocksize,tempCbuffer,SamplesSize[i],cdict);
+            }
             tempConsumeSize +=SamplesSize[i];
             free(tempCbuffer);
             free(oBuffer);
+        }
+        if ( tc_parameters->dictComp_API == 1){
+            ZSTD_freeCDict(cdict);
         }
         ZSTD_freeCCtx(cctx);
         tc_parameters->check_blockNumb_comp += nb;
@@ -666,54 +711,62 @@ static size_t DC_Stream(TC_params *tc_parameters){
 /* Regualr Compress the srcBuffer given,and return the compressed size.
     blockSize = 0 ,compress data at one time without chunking. */
 // static size_t RegularComp_Stream(void* srcBuffer,size_t srcSize,void* outBuffer,size_t blockSize)
-// {   
-//     void *buffIn = srcBuffer;
-//     // void *outBuffer = outBuffer;
-//     size_t outSize = 0;
-//     if (blockSize > 0 ){
-//         int nbSamples =  (int)((srcSize+blockSize-1)/blockSize);
-//         size_t *samplesSize = calloc(nbSamples,sizeof(size_t));
-//         int check = SetsamplesSizes(srcSize,blockSize,samplesSize);
-//         if (check){
-//             printf("Error: Regular ,Set samplesSize fail!!!\n");
-//             free(samplesSize);
-//             return -1;
-//         }
-//         int i = 0;
-//         size_t position = 0;
-//         for (i;i < nbSamples; i++){
-//             ZSTD_inBuffer inBuff = { buffIn+position, samplesSize[i], 0 };
-//             ZSTD_outBuffer outBuff= { outBuffer+outSize, blockSize, 0 };
-//             ZSTD_CCtx* const cctx = ZSTD_createCCtx();
-//             ZSTD_EndDirective const mode = ZSTD_e_end;
-//             /* If all the input data is been consumed ,return 0.*/
-//             size_t remaining = ZSTD_compressStream2(cctx,&outBuff,&inBuff,mode);
-//             position += samplesSize[i];
-//             if (remaining){
-//                 printf("Data is not fully compressed!\n");
-//                 printf("Remaining = %ld\n",remaining);
-//             }
-//             outSize += outBuff.pos;
-//         }
-//         free(samplesSize);
-//     }
-//     if (blockSize == 0 ){
-//             ZSTD_inBuffer inBuff = { buffIn, srcSize, 0 };
-//             ZSTD_outBuffer outBuff= { outBuffer, srcSize, 0 };
-//             ZSTD_CCtx* const cctx = ZSTD_createCCtx();
-//             ZSTD_EndDirective const mode = ZSTD_e_end;
-//             /* If all the input data is been consumed ,return 0.*/
-//             size_t remaining = ZSTD_compressStream2(cctx,&outBuff,&inBuff,mode);
-//             if (remaining){
-//                 printf("Data is not fully compressed!\n");
-//                 printf("Remaining = %ld\n",remaining);
-//             }
-//             outSize = outBuff.pos;
-//     }
-//     if (blockSize < 0 )
-//         printf("BlockSize is negative,please set a blockSize > 0!!!\n");
-//     return outSize;
-// }
+static size_t RegularComp_Stream(TC_params *tc_p)
+{   
+    // void *buffIn = srcBuffer;
+    TC_params* tc_parameters = tc_p;
+    size_t blockSize = tc_parameters->blockSize;
+    void *buffIn = tc_parameters->srcBuffer;
+    
+    size_t srcSize = tc_parameters->srcSize;
+    void *outBuffer = calloc(srcSize,sizeof(char));
+    size_t outSize = 0;
+    if (blockSize > 0 ){
+        int nbSamples =  (int)((srcSize+blockSize-1)/blockSize);
+        size_t *samplesSize = calloc(nbSamples,sizeof(size_t));
+        int check = SetsamplesSizes(srcSize,blockSize,samplesSize);
+        if (check){
+            printf("Error: Regular ,Set samplesSize fail!!!\n");
+            free(samplesSize);
+            return -1;
+        }
+        int i = 0;
+        size_t position = 0;
+        ZSTD_CCtx* const cctx = ZSTD_createCCtx();
+        for (i = 0;i < nbSamples; i++){
+            ZSTD_inBuffer inBuff = { buffIn+position, samplesSize[i], 0 };
+            ZSTD_outBuffer outBuff= { outBuffer+outSize, blockSize, 0 };
+            
+            ZSTD_EndDirective const mode = ZSTD_e_end;
+            /* If all the input data is been consumed ,return 0.*/
+            size_t remaining = ZSTD_compressStream2(cctx,&outBuff,&inBuff,mode);
+            position += samplesSize[i];
+            if (remaining){
+                printf("Data is not fully compressed!\n");
+                printf("Remaining = %ld\n",remaining);
+            }
+            outSize += outBuff.pos;
+        }
+        free(samplesSize);
+    }
+    if (blockSize == 0 ){
+            ZSTD_inBuffer inBuff = { buffIn, srcSize, 0 };
+            ZSTD_outBuffer outBuff= { outBuffer, srcSize, 0 };
+            ZSTD_CCtx* const cctx = ZSTD_createCCtx();
+            ZSTD_EndDirective const mode = ZSTD_e_end;
+            /* If all the input data is been consumed ,return 0.*/
+            size_t remaining = ZSTD_compressStream2(cctx,&outBuff,&inBuff,mode);
+            if (remaining){
+                printf("Data is not fully compressed!\n");
+                printf("Remaining = %ld\n",remaining);
+            }
+            outSize = outBuff.pos;
+    }
+    free(outBuffer);
+    if (blockSize < 0 )
+        printf("BlockSize is negative,please set a blockSize > 0!!!\n");
+    return outSize;
+}
 
 static void* multiple_DictionaryTrain_stream(void* tc_p){
 
@@ -800,13 +853,14 @@ void help_function(){
     printf("-M# --maxDictSize# \t: limit dictionary to specified size (default: 112640bytes.)\n");
     printf("-C# --compressChunkSize#: cut file into independent chunk of size when compress with dictionary # (default: 5 MB.)\n");
 }
+
 int main(int argc,char* argv[]) {
    
-    if (argc < 6) {
-        printf("Parameters at least 6.\n");
-        help_function();
-        return 0;
-    }
+    // if (argc < 6) {
+    //     printf("Parameters at least 6.\n");
+    //     help_function();
+    //     return 0;
+    // }
     char *file_in = argv[1];
     size_t srcSize = 0;
     void*  srcBuffer = loadFiletoBuff(file_in,&srcSize);
@@ -817,12 +871,15 @@ int main(int argc,char* argv[]) {
     unsigned maxDictSize = MAX_DICTSIZE;
     int opt;
     int option_index = 0;
-    char *optstring = "B:T:C:M:";
+    char *optstring = "B:T:C:M:R:A:";
+    int regularComp = 0;
+    int dictComp_API = 0;
     static struct option long_options[] = {
         {"blockSize", required_argument, NULL, 'B'},
         {"trainChunkSize",  required_argument, NULL, 'T'},
         {"compressChunkSize", required_argument, NULL, 'C'},
         {"maxDictSize", required_argument, NULL, 'M'},
+        {"regularcomp", required_argument, NULL, 'R'},
         {0, 0, 0, 0}
     };
     while ( (opt = getopt_long(argc, argv, optstring, long_options, &option_index)) != -1)
@@ -839,24 +896,17 @@ int main(int argc,char* argv[]) {
                             break;
                 case 'M':   readU32FromCharChecked_(optarg,&maxDictSize);
                             break;
+                case 'R':   regularComp = (int)(*optarg - '0');
+                            break;
+                case 'A':   dictComp_API = (int)(*optarg - '0');
+                            break;
                 default:    printf("Error: Failed to parse parameter.\n");
                             break;                   
             }
     }
-    // printf("blockSize = %d\n",blockSize);
-    // printf("compressSize = %d\n",compressChunkSize);
-    // printf("trainSize = %d\n",trainChunkSize);
-    // printf("maxDictSize = %d\n",maxDictSize);
 
     int trainDictOnce = 0;
-    if (srcSize < trainChunkSize)
-    {
-        printf("Source size is too samll,at least > 1 MB");
-        free(srcBuffer);
-        return 0;
-    }
-    printf("srcSize = %ld\n",srcSize);
-    if (initalize_TC_params(&tc_params,srcBuffer,srcSize,MAX_DICTSIZE,blockSize,compressChunkSize,trainChunkSize,trainDictOnce) != 0){
+    if (initalize_TC_params(&tc_params,srcBuffer,srcSize,maxDictSize,blockSize,compressChunkSize,trainChunkSize,trainDictOnce,regularComp,dictComp_API) != 0){
         printf("Initalize TC_paramters Fail!!!\n");
         free(srcBuffer);
         TC_params_free(&tc_params);
@@ -864,25 +914,38 @@ int main(int argc,char* argv[]) {
     }
     size_t dictSize = 0;
     size_t dictCompressSize = 0;
+    size_t regCompSize = 0;
     double ration = 0;
-    ZDICT_fastCover_params_t fastCoverParams = defaultFastCoverParams();   
-    while ( tc_params.totalConsumedSize < tc_params.srcSize){
-        size_t csize = 0;      
-        dictSize = DictionaryTrain_Stream(&tc_params,&fastCoverParams);
-        if (dictSize == -1) break;
-        csize= DC_Stream(&tc_params);
-        dictCompressSize += csize;
-        if (csize == -1) break;
+    if ( tc_params.regComp == 0 ){
+        if (srcSize < trainChunkSize)
+        {
+            printf("Source size is too samll,at least > 1 MB");
+            free(srcBuffer);
+            return 0;
+        }
+        ZDICT_fastCover_params_t fastCoverParams = defaultFastCoverParams();
+        while ( tc_params.totalConsumedSize < tc_params.srcSize){
+            size_t csize = 0;      
+            dictSize = DictionaryTrain_Stream(&tc_params,&fastCoverParams);
+            if (dictSize == -1) break;
+            csize= DC_Stream(&tc_params);
+            dictCompressSize += csize;
+            if (csize == -1) break;
+        }
+        ration = (srcSize*1.0/dictCompressSize);
+        double hitratio = (tc_params.dictHit_total*1.0/tc_params.srcHit_total);
+        double mLratio = (tc_params.dictmLength_total*1.0/tc_params.srcmLength_total);
+        printf("Compress Ratio: %f\n",ration);
+        printf("Total:\tHit Ratio: %f\n",hitratio);
+        printf("Total:\tDict Hit = %ld \tSrc Hit = %ld\n",tc_params.dictHit_total,tc_params.srcHit_total);
+        printf("Total:\tML Ratio: %f\n",mLratio);
+        printf("Total:\tDict ML = %ld \tSrc ML = %ld\n",tc_params.dictmLength_total,tc_params.srcmLength_total);
+    }   
+    else if ( tc_params.regComp == 1 ){
+        printf("srcSize = %ld\n",srcSize);
+        regCompSize = RegularComp_Stream(&tc_params);
+        printf("Regular Compress Size = %ld\n",regCompSize);
     }
-    ration = (srcSize*1.0/dictCompressSize);
-    double hitratio = (tc_params.dictHit_total*1.0/tc_params.srcHit_total);
-    double mLratio = (tc_params.dictmLength_total*1.0/tc_params.srcmLength_total);
-    printf("Compress Ratio: %f\n",ration);
-    printf("Total:\tHit Ratio: %f\n",hitratio);
-    printf("Total:\tDict Hit = %ld \tSrc Hit = %ld\n",tc_params.dictHit_total,tc_params.srcHit_total);
-    printf("Total:\tML Ratio: %f\n",mLratio);
-    printf("Total:\tDict ML = %ld \tSrc ML = %ld\n",tc_params.dictmLength_total,tc_params.srcmLength_total);
-    
     TC_params_free(&tc_params);
     free(srcBuffer);
     return 0;

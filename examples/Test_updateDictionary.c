@@ -26,15 +26,15 @@
 #include "../programs/dibio.h"          /* DiB_trainFromFiles */
 #include "../programs/timefn.h"         /* UTIL_time_t, UTIL_clockSpanMicro, UTIL_getTime */
 #include "../lib/common/error_private.h"
-// #include "../lib/compress/"
+#include "../lib/compress/zstd_compress_internal.h"
 
-#define KB *(1<<10)
-#define MB *(1<<20)
+// #define KB *(1<<10)
+// #define MB *(1<<20)
 #define DICT_BUFFER_SIZE 32768
 #define MAX_DICTSIZE 112640      
 #define DEFAULT_ACCEL_TEST 1
 #define SAMPLESIZE_MAX (128 KB)
-#define MIN(a,b)    ((a) < (b) ? (a) : (b))
+// #define MIN(a,b)    ((a) < (b) ? (a) : (b))
 #define DiB_rotl32_1(x,r) ((x << r) | (x >> (32 - r)))
 #define DISPLAYLEVEL 2
 #define CLEVEL  3
@@ -54,25 +54,25 @@ typedef struct pthread_train_compress
     pthread_cond_t dictComp;
     size_t MaxDictSize;
     size_t totalConsumedSize;
-    size_t dict_Exist;           /* 0:Dictionary doesn't exit,train by@train().
-                                    1: Dictionary exit,consume by@dictCompress().*/
-    size_t trainDict_Break;     /* 0: Continue train.
-                                    -1:Fininsh training.*/
-    size_t srcSize;             /* Source data size. */
+    size_t dict_Exist;                  /* 0:Dictionary doesn't exit,train by@train().
+                                         1: Dictionary exit,consume by@dictCompress().*/
+    size_t trainDict_Break;             /* 0: Continue train.
+                                        -1:Fininsh training.*/
+    size_t srcSize;                     /* Source data size. */
     size_t dictSize;
     size_t dictSize_old;
-    size_t blockSize;           /* Compress and Train blocksize. */
-    size_t tempcSize;           /* Compress chunksize.*/
-    size_t temptSize;           /*Train chunksize.*/
-    // size_t trainNewDict;        /* 1: Train new dictionary.
-    //                                 0: Use the old dictionary.*/
+    size_t blockSize;                   /* Compress and Train blocksize. */
+    size_t tempcSize;                   /* Compress chunksize.*/
+    size_t temptSize;                   /*Train chunksize.*/
+    // size_t trainNewDict;             /* 1: Train new dictionary.
+    //                                  0: Use the old dictionary.*/
     size_t trainConsumed;
     size_t exitThread;
    /* Match Hit. */
-    size_t dictHit_singelChunk;     /* Singel Chunk dictionary match hit. */
-    size_t srcHit_singelChunk;      /* Singel Chunk source match hit. */
-    size_t dictHit_total;           /* Total dictionary match hit. */
-    size_t srcHit_total;            /* Total source match hit. */
+    size_t dictHit_singelChunk;         /* Singel Chunk dictionary match hit. */
+    size_t srcHit_singelChunk;          /* Singel Chunk source match hit. */
+    size_t dictHit_total;               /* Total dictionary match hit. */
+    size_t srcHit_total;                /* Total source match hit. */
     size_t check_blockNumb_train;
     size_t check_blockNumb_comp;
     // double hitRatio_singelChunk;    
@@ -84,24 +84,24 @@ typedef struct pthread_train_compress
     size_t srcmLength_singelChunk;      /* Singel Chunk source mLength. */
     size_t dictmLength_total;           /* Total dictionary mLength. */
     size_t srcmLength_total;            /* Total source  mLength. */
-    int trainDictOnce;             /* Only use the first dictionary. */
-    void* dictBuffer_first;      /* The first dictionary.  */
+    int trainDictOnce;                  /* Only use the first dictionary. */
+    void* dictBuffer_first;             /* The first dictionary.  */
     size_t dictSize_first;
-    double ratio ;              /* Compress Ratio. */
+    double ratio ;                      /* Compress Ratio. */
     // double *saveHit_ratio;      
-    double *saveComp_ratio;     /* Compress Ratio each chunk. */
-    // double *saveMatch_ratio;    /* mLength dict each singel chunk / srcLength each chunk*/
-    double *saveMS_ratio;       /* mLength each chunk / chunkSize (srcSize). */
-    double *saveDS_ratio;       /* dict mLength each chunk / chunkSize (srcSize). */
-    double *saveMD_ratio;
-    double *saveMSDiff_ratio;    /* Difference = (the second MSRatio - the first MSRatio)*/
-    double *savetrainTime_singelChunk;
-    double *savecompTime_singelChunk;
-    double MSRatio_total;       /* MS: (Match Length in src) / (src Size) */
-    double DSRatio_total;
+    double *saveComp_ratio;             /* Compress Ratio each chunk. */
+    // double *saveMatch_ratio;         /* mLength dict each singel chunk / srcLength each chunk*/
+    double *saveMS_ratio;               /* mLength each chunk / chunkSize (srcSize). */
+    double *saveDS_ratio;               /* dict mLength each chunk / chunkSize (srcSize). */
+    double *saveMD_ratio;               /* Src match reatio change singel chunk. */
+    double *saveMSDiff_ratio;           /* Difference = (the second MSRatio - the first MSRatio)*/
+    double *savetrainTime_singelChunk;      /* Train time singel chunk. */
+    double *savecompTime_singelChunk;       /* COmpress time singel chunk. */
+    double MSRatio_total;                   /* MS: (Match Length in src) / (src Size) */
+    double DSRatio_total;                   /* DS: (Match Length in dict) / (src Size)*/
     double trainTime;
     double compTime;
-    double cctime;              /* each chunk compress time. */
+    double cctime;                          /* each chunk compress time. */
     int count;
     int display;
 }TC_params;
@@ -151,7 +151,7 @@ static int Random_LoadTrainBuffer(size_t trainSize,size_t blockSize,size_t endPo
 void help_function(){
     printf("example: ./Test_updateDictionary file -B 4096 -T 1MB -C 5MB -M 110KB --trainDictOnce 0 -D 2\n");
     printf("\n");
-    printf("--trainDictOnce# \t: 1 Only use the first dictionary\n\t\t\t0 default:The first chunk use a empty dictionary,the second chunk use the dictionary trained from the first chunk,and so on.\n\t\t\t3 Each chunk use a new dictioary trained from current chunk.\n");
+    printf("-O# --trainDictOnce# \t: 1 Only use the first dictionary\n\t\t\t0 default:The first chunk use a empty dictionary,the second chunk use the dictionary trained from the first chunk,and so on.\n\t\t\t3 Each chunk use a new dictioary trained from current chunk.\n");
     printf("-B# --blockSize# \t: cut file into independent blocks of size # (default: 4096bytes.)\n");
     printf("-T# --trainChunkSize# \t: cut file into independent chunk of size when training dictionary # (default: 1 MB.)\n");
     printf("-M# --maxDictSize# \t: limit dictionary to specified size (default: 112640bytes.)\n");
@@ -597,6 +597,14 @@ static size_t  DictionaryTrain_Stream(TC_params *tc_parameters,ZDICT_fastCover_p
         }
     return result;
 }
+/*  Comer case:
+                if the src buffer which can't be compressed , outBuff.pos will be assignment an wrong value which is very samll and not true.
+                to avoid this case must initalized cctx->streamStage :  
+                cctx->streamStage = zcss_init.
+
+                ZSTD doesn't have an stream compress mode api that you can use it to compress with chunk size small like 4096 bytes.
+                In multiple compress mode ,you can use -B# to set block size.
+                (minimum value is 512KB in default compress level,the minimum value will change if the compress level upper or lower.)*/
 static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* OutBuffer,ZSTD_CCtx* cctx)
 // static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* dictBuffer,size_t dictSize,void* OutBuffer)
 {
@@ -611,6 +619,7 @@ static size_t DictionaryComp_Stream(void* srcBuffer,size_t srcSize,void* OutBuff
     clock_t start_time,end_time;
     start_time = clock();
     ZSTD_compressStream2(cctx, &outBuff, &inBuff, ZSTD_e_end);
+    cctx->streamStage = zcss_init;
     end_time = clock();
     double time_block = 0.0;
     time_block = (double)(end_time - start_time)/CLOCKS_PER_SEC;
@@ -1126,7 +1135,7 @@ int main(int argc,char* argv[]) {
     }
     int opt;
     int option_index = 0;
-    char *optstring = "B:T:C:M:D:";
+    char *optstring = "B:T:C:M:D:O:";
     static struct option long_options[] = {
         {"blockSize", required_argument, NULL, 'B'},
         {"trainChunkSize",  required_argument, NULL, 'T'},
